@@ -4,9 +4,10 @@
 default:
     @just --list
 
-# run the tests
+# run the tests; nextest skips doctests, so they run separately
 test:
     cargo nextest run --workspace --no-tests=pass
+    cargo test --doc --workspace
 
 # format every file (rust, toml, markdown, nix, yaml; see treefmt.nix)
 fmt:

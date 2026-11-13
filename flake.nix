@@ -93,6 +93,7 @@
               runHook preBuild
               cargo clippy --workspace --all-targets --offline -- -D warnings
               cargo nextest run --workspace --offline --no-tests=pass
+              cargo test --doc --workspace --offline
               runHook postBuild
             '';
 
