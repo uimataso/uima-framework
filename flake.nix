@@ -115,6 +115,7 @@
 
               (treefmtFor system).config.build.wrapper
               cargo-nextest
+              cargo-mutants
               just
               git
             ];

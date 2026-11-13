@@ -24,6 +24,11 @@ lint:
 # full pre-commit gate: formatting + lint + tests
 check: fmt-check lint test
 
+# mutation testing: break the code in small ways and check a test fails;
+# slower than `test`, so it isn't part of `check` or CI
+mutants *args:
+    cargo mutants --workspace --test-tool nextest {{args}}
+
 # the CI gate, as CI runs it
 ci:
     nix flake check -L

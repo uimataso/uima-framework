@@ -7,3 +7,6 @@
 
 # Local planning notes, not published
 /docs/plan.md
+
+# cargo-mutants output
+/mutants.out*
