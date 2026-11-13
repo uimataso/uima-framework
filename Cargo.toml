@@ -17,9 +17,6 @@ manual_map = "allow"
 [workspace.dependencies]
 # local crates
 uima-cancel = { path = "./crates/cancel", version = "0.0.0" }
-uima-core = { path = "./crates/core", version = "0.0.0" }
-uima-log-tracing = { path = "./crates/log-tracing", version = "0.0.0" }
-uima-runtime = { path = "./crates/runtime", version = "0.0.0" }
 
 # workspace dependencies
 tokio = { version = "1", default-features = false }
