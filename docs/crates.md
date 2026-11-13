@@ -63,9 +63,10 @@ uima-log-tracing = { git = "https://github.com/uimataso/uima-framework", rev = "
 ```
 
 - **Toolchain:** the app's toolchain must be at least the framework's `rust-version`.
-- **Nix:** `importCargoLock` needs a hash per git crate, in `cargoLock.outputHashes`
-  (`"uima-log-tracing-0.0.0" = "sha256-...";`). After bumping `rev`, set them to `lib.fakeHash`
-  and nix prints the right ones.
+- **Nix:** `importCargoLock` fetches the repo once per `rev` and needs its hash in
+  `cargoLock.outputHashes`, under the name of any one crate from it
+  (`"uima-log-tracing-0.0.0" = "sha256-...";`). After bumping `rev`, set it to `lib.fakeHash` and
+  nix prints the right one.
 - **Local checkout:** put the `[patch]` in the app's `.cargo/config.toml` and don't commit it, so
   `nix build`, which only sees committed files, still uses the git `rev`. The patch also rewrites
   `Cargo.lock`; don't commit that either:
