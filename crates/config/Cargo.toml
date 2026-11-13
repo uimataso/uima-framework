@@ -1,0 +1,15 @@
+[package]
+name = "uima-config"
+version.workspace = true
+rust-version.workspace = true
+edition.workspace = true
+authors.workspace = true
+
+[dependencies]
+tracing = { workspace = true }
+
+[dev-dependencies]
+assert2 = { workspace = true }
+
+[lints]
+workspace = true

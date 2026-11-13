@@ -1,5 +1,6 @@
 //! Stopping on a shutdown signal.
 
+use tracing::info;
 use uima_cancel::{CancelExt as _, CancelToken};
 
 /// Completes on SIGINT (Ctrl-C) or, on unix, SIGTERM, which is what `docker stop` sends, and
@@ -26,8 +27,8 @@ pub async fn shutdown_signal() {
     let terminate = std::future::pending::<()>();
 
     tokio::select! {
-        () = interrupt => tracing::info!("SIGINT received, shutting down"),
-        () = terminate => tracing::info!("SIGTERM received, shutting down"),
+        () = interrupt => info!("SIGINT received, shutting down"),
+        () = terminate => info!("SIGTERM received, shutting down"),
     }
 }
 

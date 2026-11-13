@@ -365,6 +365,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "uima-config"
+version = "0.0.0"
+dependencies = [
+ "assert2",
+ "tracing",
+]
+
+[[package]]
 name = "uima-core"
 version = "0.0.0"
 
