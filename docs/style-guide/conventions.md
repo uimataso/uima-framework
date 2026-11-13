@@ -1,0 +1,79 @@
+# Conventions
+
+## Declaration order
+
+Rust doesn't need forward declarations, so order a file top to bottom for the reader: constants
+first, then public items before private ones, and high-level logic before the supporting types and functions it uses.
+
+```rust
+/// Length of an invite code.
+pub const INVITE_CODE_LEN: usize = 8;
+/// Characters an invite code is made of, shared by generating and checking a code.
+const INVITE_CODE_CHARS: &[u8] = b"ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+
+pub struct Invitation {
+    code: InviteCode,
+    expires_at: Timestamp,
+    uses_left: u32,
+}
+
+impl Invitation {
+    /// How many times one invitation can be redeemed.
+    pub const MAX_USES: u32 = 10;
+    const VALID_FOR: Duration = Duration::from_secs(7 * 24 * 60 * 60);
+
+    pub fn new(now: Timestamp) -> Self { ... }
+    pub fn redeem(&mut self, now: Timestamp) -> Result<(), RedeemError> { ... }
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum RedeemError {
+    #[error("invitation expired")]
+    Expired,
+    #[error("invitation used up")]
+    UsedUp,
+}
+
+// private helpers, declared in the order they're first used above
+fn check_not_expired(expires_at: Timestamp, now: Timestamp) -> Result<(), RedeemError> { ... }
+fn take_one_use(uses_left: &mut u32) -> Result<(), RedeemError> { ... }
+```
+
+- A constant that belongs to one type is an associated constant (`Invitation::MAX_USES`), at the top
+  of its `impl` block. Other constants (`INVITE_CODE_LEN`, `INVITE_CODE_CHARS`) go at the top of
+  the file.
+- Either way, all constants come before anything else in their block, public ones first.
+- A private helper declared above the public item that uses it makes the reader hold onto context
+  they can't place yet while they look for where it's used.
+
+## Newtypes
+
+Wrap a primitive in a newtype when the value has a meaning or a rule the primitive doesn't: an ID,
+a count that can't go negative, a name with a length limit. The compiler then catches a user ID
+passed where an invitation ID is expected, and a value that exists is a value that was checked.
+
+```rust
+/// An invitation code: `INVITE_CODE_LEN` characters from `INVITE_CODE_CHARS`.
+pub struct InviteCode(String);
+
+impl InviteCode {
+    pub fn new(raw: &str) -> Result<Self, InvalidInviteCode> { ... }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+#[error("invite code must be {INVITE_CODE_LEN} letters or digits, without I, O, 0 or 1")]
+pub struct InvalidInviteCode;
+```
+
+- The field is private and the only way in is a constructor that checks the rule, so every
+  `InviteCode` in the program is valid. Code that takes an `InviteCode` doesn't check again.
+- The constructor returns a `Result` with an error type named for the newtype (`InvalidInviteCode`).
+  Its message states the rule and never quotes the input, which may be a secret or user data.
+- Convert at the edges: parse into the newtype where the value enters (an HTTP request, a database
+  row, config) and turn it back into a primitive only where it leaves.
+- Add only the conversions callers need (`as_str`, `Display`, `From<InviteCode> for String`);
+  don't derive `Deref` to the inner type, which hands out the primitive and loses the point.

@@ -1,0 +1,36 @@
+# Runs the check gate (formatting, clippy and tests, via `nix flake check`)
+# on every push and pull request.
+name: ci
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: cachix/install-nix-action@v31
+
+      # Saves /nix/store between runs (toolchain, crates, earlier builds).
+      # The key changes with anything that changes what gets built; a miss
+      # restores the newest older cache and saves a new one at the end.
+      - uses: nix-community/cache-nix-action@v6
+        with:
+          primary-key: nix-${{ runner.os }}-${{ hashFiles('flake.lock', '**/*.nix', 'rust-toolchain.toml', 'Cargo.lock') }}
+          restore-prefixes-first-match: nix-${{ runner.os }}-
+          # Keep the saved store small: GC down to this before saving.
+          gc-max-store-size-linux: 2G
+          # Delete older caches of this workflow so they don't crowd the
+          # repo's 10 GB cache quota.
+          purge: true
+          purge-prefixes: nix-${{ runner.os }}-
+          purge-created: 0
+          purge-primary-key: never
+
+      - name: Check
+        run: nix flake check -L

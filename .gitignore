@@ -1,0 +1,9 @@
+/target
+/result
+/.direnv
+/.envrc.local
+/.env
+*.log
+
+# Local planning notes, not published
+/docs/plan.md

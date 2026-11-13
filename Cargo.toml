@@ -1,0 +1,32 @@
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.0.0"
+rust-version = "1.100"
+edition = "2024"
+authors = ["uima"]
+
+[workspace.lints.clippy]
+uninlined_format_args = "allow"
+unused_async = "allow"
+option_option = "allow"
+manual_map = "allow"
+
+[workspace.dependencies]
+# local crates
+uima-core = { path = "./crates/core", version = "0.0.0" }
+uima-log-tracing = { path = "./crates/log-tracing", version = "0.0.0" }
+
+# workspace dependencies
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", default-features = false }
+
+# dev dependencies
+assert2 = "0.4"
+
+[profile.dev]
+# Disabling debug info speeds up builds a bunch,
+# since we don't rely on it for debugging that much.
+debug = 0
