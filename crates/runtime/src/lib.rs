@@ -1,4 +1,4 @@
-//! Process-level plumbing for a service's `main`: stopping on a shutdown signal.
+//! Process-level plumbing for a service's `main`: stopping on a shutdown signal, and time limits.
 //!
 //! ```no_run
 //! # async fn serve(_: impl std::future::Future<Output = ()>) {}
@@ -14,5 +14,7 @@
 //! ```
 
 mod signal;
+mod timeout;
 
 pub use signal::{cancel_on_shutdown_signal, shutdown_signal};
+pub use timeout::TimeoutExt;

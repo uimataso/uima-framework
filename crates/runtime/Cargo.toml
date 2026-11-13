@@ -10,12 +10,12 @@ authors.workspace = true
 uima-cancel = { workspace = true }
 
 # workspace dependencies
-tokio = { workspace = true, features = ["macros", "signal"] }
+tokio = { workspace = true, features = ["macros", "signal", "time"] }
 tracing = { workspace = true }
 
 [dev-dependencies]
 assert2 = { workspace = true }
-tokio = { workspace = true, features = ["macros", "rt"] }
+tokio = { workspace = true, features = ["macros", "rt", "test-util"] }
 
 [lints]
 workspace = true
