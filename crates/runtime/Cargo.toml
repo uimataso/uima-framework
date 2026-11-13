@@ -1,0 +1,21 @@
+[package]
+name = "uima-runtime"
+version.workspace = true
+rust-version.workspace = true
+edition.workspace = true
+authors.workspace = true
+
+[dependencies]
+# local crates
+uima-cancel = { workspace = true }
+
+# workspace dependencies
+tokio = { workspace = true, features = ["macros", "signal"] }
+tracing = { workspace = true }
+
+[dev-dependencies]
+assert2 = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt"] }
+
+[lints]
+workspace = true
