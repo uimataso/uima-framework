@@ -43,15 +43,55 @@ pub async fn cancel_on_shutdown_signal(token: &CancelToken) {
 
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
+
     use assert2::check;
 
     use super::*;
+    use crate::TimeoutExt as _;
+
+    #[tokio::test]
+    async fn shutdown_signal_waits_for_a_signal() {
+        check!(
+            shutdown_signal()
+                .timeout(Duration::from_millis(50))
+                .await
+                .is_err()
+        );
+    }
+
+    // Sends SIGTERM to this process, so it relies on nextest running each test in its own
+    // process.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn sigterm_cancels_the_token() {
+        let token = CancelToken::new();
+        let watcher = tokio::spawn({
+            let token = token.clone();
+            async move { cancel_on_shutdown_signal(&token).await }
+        });
+        // Let the watcher install its handler before the signal arrives.
+        tokio::time::sleep(Duration::from_millis(100)).await;
+
+        let pid = std::process::id().to_string();
+        let sent = std::process::Command::new("kill")
+            .args(["-TERM", &pid])
+            .status();
+        check!(sent.unwrap().success());
+
+        let finished = watcher.timeout(Duration::from_secs(5)).await;
+        check!(finished.is_ok());
+        check!(token.is_cancelled());
+    }
 
     #[tokio::test]
     async fn returns_once_the_token_is_cancelled_elsewhere() {
         let token = CancelToken::new();
         token.cancel();
-        cancel_on_shutdown_signal(&token).await;
+        let returned = cancel_on_shutdown_signal(&token)
+            .timeout(Duration::from_secs(1))
+            .await;
+        check!(returned.is_ok());
         check!(token.is_cancelled());
     }
 }

@@ -137,6 +137,12 @@ mod tests {
     use super::*;
 
     #[test]
+    fn debug_shows_no_values() {
+        let env = Env::from_pairs([("SECRET", "s3cret")]);
+        check!(format!("{env:?}") == "Env { .. }");
+    }
+
+    #[test]
     fn get_reads_the_value() {
         let env = Env::from_pairs([("A", "1")]);
         check!(env.get("A") == Some("1".to_owned()));

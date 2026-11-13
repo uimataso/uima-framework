@@ -175,6 +175,14 @@ mod tests {
 
     use super::*;
 
+    // Installs the global subscriber, so it relies on nextest running each test in its own
+    // process.
+    #[test]
+    fn init_installs_the_global_subscriber() {
+        init("info");
+        check!(tracing::dispatcher::has_been_set());
+    }
+
     /// A writer that keeps what was written, for reading back after logging.
     #[derive(Clone, Default)]
     struct Captured(Arc<Mutex<Vec<u8>>>);

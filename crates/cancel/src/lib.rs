@@ -130,7 +130,8 @@ mod tests {
         let token = CancelToken::new();
         let cancelled = token.cancelled();
         token.cancel();
-        cancelled.await;
+        let completed = tokio::time::timeout(Duration::from_secs(1), cancelled).await;
+        check!(completed.is_ok());
     }
 
     #[tokio::test]
@@ -139,7 +140,9 @@ mod tests {
         check!(async { 1 }.until_cancelled(&token).await == Some(1));
 
         token.cancel();
-        check!(std::future::pending::<()>().until_cancelled(&token).await == None);
+        let cut = std::future::pending::<()>().until_cancelled(&token);
+        let output = tokio::time::timeout(Duration::from_secs(1), cut).await;
+        check!(output == Ok(None));
     }
 
     #[tokio::test]
