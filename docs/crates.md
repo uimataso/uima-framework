@@ -53,14 +53,24 @@ twice with two incompatible copies of its types. Helpers tied to one crate go be
 ## Depending on the framework
 
 There is no facade crate re-exporting the others. An app lists the `uima-*` crates it uses once,
-in its root `[workspace.dependencies]`, all at the same `rev`, and its crates use
-`{ workspace = true }`:
+all at the same `rev`: in its root `[workspace.dependencies]`, with its crates using
+`{ workspace = true }`, or in `[dependencies]` for a single-crate app.
 
 ```toml
 [workspace.dependencies]
-uima-core = { git = "https://git.uimataso.com/uima/uima-framework", rev = "<rev>" }
-uima-log-tracing = { git = "https://git.uimataso.com/uima/uima-framework", rev = "<rev>" }
+uima-core = { git = "https://github.com/uimataso/uima-framework", rev = "<rev>" }
+uima-log-tracing = { git = "https://github.com/uimataso/uima-framework", rev = "<rev>" }
 ```
 
-To work against a local checkout, one `[patch."https://git.uimataso.com/uima/uima-framework"]`
-block points them all at it.
+- **Toolchain:** the app's toolchain must be at least the framework's `rust-version`.
+- **Nix:** `importCargoLock` needs a hash per git crate, in `cargoLock.outputHashes`
+  (`"uima-log-tracing-0.0.0" = "sha256-...";`). After bumping `rev`, set them to `lib.fakeHash`
+  and nix prints the right ones.
+- **Local checkout:** put the `[patch]` in the app's `.cargo/config.toml` and don't commit it, so
+  `nix build`, which only sees committed files, still uses the git `rev`. The patch also rewrites
+  `Cargo.lock`; don't commit that either:
+
+  ```toml
+  [patch."https://github.com/uimataso/uima-framework"]
+  uima-log-tracing = { path = "../uima-framework/crates/log-tracing" }
+  ```
