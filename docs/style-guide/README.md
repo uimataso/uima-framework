@@ -2,10 +2,9 @@
 
 How Rust is written in uima-framework and every service built on it.
 
-Run `just fmt` before committing; `just fmt-check` (and CI) fails on unformatted files.
-
 - [Cargo](cargo.md): features and `Cargo.toml`.
 - [Conventions](conventions.md): how code is organized and written.
+- [Docs](docs.md): how rustdoc, Markdown docs and other prose are written.
 - [Testing](testing.md): how tests are organized and written.
 
 How this repo's own crates are laid out and named is in [docs/crates.md](../crates.md).
