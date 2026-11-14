@@ -1,6 +1,6 @@
 //! [`uid!`](crate::uid), a newtype for an entity's uid.
 
-/// Defines a `Copy` newtype over [`uuid::Uuid`] for one entity's uid.
+/// Defines a newtype over [`uuid::Uuid`] for one entity's uid, such as a user's or a post's.
 ///
 /// ```
 /// uima_core::uid!(
@@ -13,6 +13,17 @@
 /// assert_eq!(parsed, post);
 /// ```
 ///
+/// The type is `Copy`, ordered, and hashable. It has:
+///
+/// - `generate`, a new UUID v7, ordered by when it was generated.
+/// - `from_uuid`, usable in a `const`, and `as_uuid`.
+/// - `From<Uuid>`, `From<Name> for Uuid`, and `FromStr`, whose error is a [`uuid::Error`].
+/// - `Display` as the hyphenated uuid.
+///
+/// It has no `Default`: a uid is generated or read back.
+///
+/// # Distinct types
+///
 /// Two uid types don't mix, even though both wrap a `Uuid`:
 ///
 /// ```compile_fail
@@ -22,10 +33,6 @@
 /// fn author(_: UserUid) {}
 /// author(PostUid::generate()); // error: expected `UserUid`, found `PostUid`
 /// ```
-///
-/// The type converts from and into `Uuid`, displays and parses as the hyphenated uuid, and has no
-/// `Default`: a uid is either generated or read back. Attributes, such as doc comments or serde
-/// derives, go on the struct.
 #[macro_export]
 macro_rules! uid {
     ($(#[$meta:meta])* $vis:vis $name:ident $(,)?) => {
