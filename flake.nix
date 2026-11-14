@@ -1,8 +1,9 @@
 {
-  description = "uima-framework — the common base for uima's services";
+  description = "uima-framework: the common base for uima's services";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+    crane.url = "github:ipetkov/crane";
     rust-overlay = {
       url = "github:oxalica/rust-overlay";
       inputs.nixpkgs.follows = "nixpkgs";
@@ -17,6 +18,7 @@
     {
       self,
       nixpkgs,
+      crane,
       rust-overlay,
       treefmt-nix,
     }:
@@ -55,46 +57,30 @@
         system:
         let
           pkgs = nixpkgs.legacyPackages.${system};
-          toolchain = toolchainFor system;
-          rustPlatform = pkgs.makeRustPlatform {
-            cargo = toolchain;
-            rustc = toolchain;
+          craneLib = (crane.mkLib pkgs).overrideToolchain (_: toolchainFor system);
+          common = {
+            pname = "uima-framework";
+            version = "0.0.0";
+            # Only the Rust sources and Cargo files, so a docs change doesn't
+            # rebuild anything.
+            src = craneLib.cleanCargoSource ./.;
           };
+          # The dependencies, built once and cached apart from the crates.
+          cargoArtifacts = craneLib.buildDepsOnly common;
         in
         {
           # Every file is formatted as treefmt.nix says.
           formatting = (treefmtFor system).config.build.check self;
 
-          # A library workspace has nothing to install, so this is a
-          # derivation that only runs clippy.
-          workspace = pkgs.stdenv.mkDerivation {
-            name = "uima-framework-check";
-
-            # Only what cargo needs.
-            src = lib.fileset.toSource {
-              root = ./.;
-              fileset = lib.fileset.unions [
-                ./Cargo.toml
-                ./Cargo.lock
-                ./crates
-              ];
-            };
-
-            cargoDeps = rustPlatform.importCargoLock { lockFile = ./Cargo.lock; };
-
-            nativeBuildInputs = [
-              rustPlatform.cargoSetupHook
-              toolchain
-            ];
-
-            buildPhase = ''
-              runHook preBuild
-              cargo clippy --workspace --all-targets --all-features --offline -- -D warnings
-              runHook postBuild
-            '';
-
-            installPhase = ''touch "$out"'';
-          };
+          # A library workspace has nothing to install, so the check is
+          # clippy alone.
+          clippy = craneLib.cargoClippy (
+            common
+            // {
+              inherit cargoArtifacts;
+              cargoClippyExtraArgs = "--workspace --all-targets --all-features -- -D warnings";
+            }
+          );
         }
       );
 

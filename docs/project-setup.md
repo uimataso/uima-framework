@@ -32,6 +32,25 @@ Before a commit, run `just check test`.
 - **`rust-version`**: a library sets it to the oldest Rust it builds with. A service leaves it out;
   its `rust-toolchain.toml` already says which Rust it uses.
 
+## Build
+
+`flake.nix` builds with [crane]. See the `clippy` check in this repo's [`flake.nix`](../flake.nix).
+
+- **Dependencies** build once in their own derivation and are reused by the build and the checks,
+  so a change to the project's code doesn't rebuild them. Git dependencies need no hash.
+- **Sources**: `cleanCargoSource`, which keeps the Rust sources and Cargo files. Add any other file
+  the build reads, such as `migrations/` for `sqlx::migrate!` or an asset under `include_str!`.
+- **Packages** are named, with no `packages.default`: `packages.<project>` holds every binary of
+  the workspace, built once. A single-binary project sets `meta.mainProgram`, so
+  `nix run .#<project>` runs it.
+- **Build sha**: the build sets `BUILD_SHA` to the commit, `<sha>-dirty` with uncommitted changes.
+  The app's `main` reads it with `option_env!("BUILD_SHA")`, falling back to `"dev"` in a plain
+  `cargo build`, and hands it to whatever reports it. A framework crate doesn't read it itself,
+  since its value would be fixed when the dependencies are built.
+- **TLS** is rustls, not OpenSSL, so neither the build nor the image needs a system library.
+- **Tests** don't run in the build; see [Tests](#tests).
+- **Profile**: Cargo's default release profile.
+
 ## Dev shell
 
 `nix develop` gives the toolchain and every tool the recipes run. A project adds the tools its own
@@ -87,6 +106,7 @@ rustc's and Clippy's default lints, plus a few more that the project's `Cargo.to
 - **Proptest**: commit the `proptest-regressions/` files, so a case that once failed runs every
   time.
 
+[crane]: https://crane.dev
 [nextest]: https://nexte.st
 [nextest#16]: https://github.com/nextest-rs/nextest/issues/16
 [testcontainers]: https://github.com/testcontainers/testcontainers-rs
