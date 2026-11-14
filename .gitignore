@@ -10,3 +10,6 @@
 
 # cargo-mutants output
 /mutants.out*
+
+# Claude Code session files
+/.claude/
