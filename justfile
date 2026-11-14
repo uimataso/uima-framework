@@ -29,7 +29,7 @@ check: fmt-check lint
 mutants *args:
     cargo mutants --workspace --test-tool nextest {{args}}
 
-# the CI gate, as CI runs it: the static checks and build in nix, then the tests
+# the CI gate, which CI runs: the static checks and build in nix, then the tests
 ci:
     nix flake check -L
     NEXTEST_PROFILE=ci nix develop -c just test

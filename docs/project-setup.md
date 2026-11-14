@@ -7,14 +7,14 @@ own files are the working example.
 
 Every project's `justfile` has these recipes, and adds its own (such as `run`) beside them:
 
-| Recipe      | Runs                                                                             |
-| ----------- | -------------------------------------------------------------------------------- |
-| `fmt`       | Formats every file.                                                              |
-| `fmt-check` | Checks the formatting without changing files.                                    |
-| `lint`      | The linters, warnings as errors.                                                 |
-| `check`     | `fmt-check` and `lint`.                                                          |
-| `test`      | Every test the project has, Rust or not.                                         |
-| `ci`        | The gate as CI runs it: `nix flake check`, then `test` with the CI test profile. |
+| Recipe      | Runs                                                                                          |
+| ----------- | --------------------------------------------------------------------------------------------- |
+| `fmt`       | Formats every file.                                                                           |
+| `fmt-check` | Checks the formatting without changing files.                                                 |
+| `lint`      | The linters, warnings as errors.                                                              |
+| `check`     | `fmt-check` and `lint`.                                                                       |
+| `test`      | Every test the project has, Rust or not.                                                      |
+| `ci`        | The whole gate: `nix flake check`, then `test` with the CI test profile. CI runs this recipe. |
 
 `nix flake check` runs the same checks as `check`; the tests stay out of it (see [Tests](#tests)).
 Before a commit, run `just check test`.
@@ -68,6 +68,32 @@ Before a commit, run `just check test`.
   without the `v`. A moving tag such as `latest` or `dev` is the project's to choose, for its
   deploy.
 - **Architecture**: the one the CI runner has.
+
+## CI
+
+Each project's workflow runs on its own CI host, in three stages:
+
+1. **Every push**: `nix develop -c just ci`, so the gate is defined once, in the `justfile`.
+2. **Main**: build the images and publish each under its build sha and the project's moving tag,
+   such as `latest` or `dev`. The moving tag moves only while the commit is still main's tip, so a
+   slow run can't move it back. Then the project's own deploy steps, if any.
+3. **A release tag** (`v1.2.3`): tag the image main already built for that commit as `1.2.3`,
+   without rebuilding it, so production runs the image dev ran.
+
+- **Publishing** goes through the flake's apps, so CI and a local run push the same way. The CI
+  host only logs in to the registry.
+- **Actions** (GitHub) are pinned to a commit sha, with the version in a comment.
+- **Triggers**: `push` and `workflow_dispatch`. Every job has a timeout.
+- **Nix cache**: the store is kept between runs, by `cache-nix-action` on GitHub and by a volume on
+  the Forgejo runner.
+
+### Image retention
+
+Each registry's own cleanup rules keep:
+
+- every release tag (`1.2.3`);
+- the images the moving tags point at;
+- the 10 most recent images that have only a build sha tag.
 
 ## Dev shell
 

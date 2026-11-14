@@ -14,5 +14,5 @@ all build with.
 nix develop        # or: direnv allow
 just check         # formatting + lints
 just test          # every test
-just ci            # nix flake check, then the tests, as CI runs them
+just ci            # the whole gate; CI runs this
 ```
