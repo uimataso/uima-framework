@@ -43,13 +43,31 @@ Before a commit, run `just check test`.
 - **Packages** are named, with no `packages.default`: `packages.<project>` holds every binary of
   the workspace, built once. A single-binary project sets `meta.mainProgram`, so
   `nix run .#<project>` runs it.
-- **Build sha**: the build sets `BUILD_SHA` to the commit, `<sha>-dirty` with uncommitted changes.
+- **Build sha**: the build sets `BUILD_SHA` to the commit's first 12 hex digits, with `-dirty`
+  added for uncommitted changes. The image tag uses the same 12 digits, so the binary, what it
+  reports and the image name one commit the same way.
   The app's `main` reads it with `option_env!("BUILD_SHA")`, falling back to `"dev"` in a plain
   `cargo build`, and hands it to whatever reports it. A framework crate doesn't read it itself,
   since its value would be fixed when the dependencies are built.
 - **TLS** is rustls, not OpenSSL, so neither the build nor the image needs a system library.
 - **Tests** don't run in the build; see [Tests](#tests).
 - **Profile**: Cargo's default release profile.
+
+## Image
+
+`flake.nix` builds an image per binary, `packages.<binary>-image`, with nix's
+`dockerTools.streamLayeredImage`; there is no Dockerfile.
+
+- **Contents**: the binary and the CA certificates (`SSL_CERT_FILE` points at them). A project adds
+  what its binary runs, such as a CLI it calls; debugging tools stay out.
+- **User**: not root. The default uid is 65532; a project picks another when its volumes need one.
+- **Config**: `ExposedPorts` and `Env` come from the project, with `RUST_LOG=info` by default.
+- **Labels**: `org.opencontainers.image.revision` (the build sha) and
+  `org.opencontainers.image.source` (the repo URL).
+- **Tags**: the build sha on every image. A release, tagged `v1.2.3` in git, also gets `1.2.3`,
+  without the `v`. A moving tag such as `latest` or `dev` is the project's to choose, for its
+  deploy.
+- **Architecture**: the one the CI runner has.
 
 ## Dev shell
 
