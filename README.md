@@ -11,6 +11,7 @@ all build with.
 
 ```sh
 nix develop        # or: direnv allow
-just check         # fmt + clippy + tests
-just ci            # nix flake check, as CI runs it
+just check         # formatting + lints
+just test          # every test
+just ci            # nix flake check, then the tests, as CI runs them
 ```

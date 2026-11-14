@@ -51,7 +51,8 @@
       # `nix fmt`
       formatter = forAllSystems (system: (treefmtFor system).config.build.wrapper);
 
-      # The CI gate: the same fmt + clippy + test as `just check`.
+      # The static half of the CI gate, the same formatting and lints as
+      # `just check`. Tests run outside the sandbox, through `just test`.
       checks = forAllSystems (
         system:
         let
@@ -66,8 +67,8 @@
           # Every file is formatted as treefmt.nix says.
           formatting = (treefmtFor system).config.build.check self;
 
-          # A library workspace has nothing to install, so this is one
-          # derivation that runs clippy and the tests.
+          # A library workspace has nothing to install, so this is a
+          # derivation that only runs clippy.
           workspace = pkgs.stdenv.mkDerivation {
             name = "uima-framework-check";
 
@@ -86,14 +87,11 @@
             nativeBuildInputs = with pkgs; [
               rustPlatform.cargoSetupHook
               toolchain
-              cargo-nextest
             ];
 
             buildPhase = ''
               runHook preBuild
               cargo clippy --workspace --all-targets --all-features --offline -- -D warnings
-              cargo nextest run --workspace --offline --no-tests=pass
-              cargo test --doc --workspace --offline
               runHook postBuild
             '';
 

@@ -22,5 +22,6 @@ sowah, nova-el, techo and genkan.
 
 ## Checks
 
-`just check` runs fmt, clippy (warnings are errors) and nextest. CI runs the same through
-`nix flake check` (`just ci`).
+`just check` runs the formatting and lint checks (warnings are errors), and `just test` runs
+every test; run both (`just check test`) before a commit. CI runs the same, as `just ci` does:
+`nix flake check`, then the tests in the dev shell.

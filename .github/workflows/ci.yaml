@@ -1,5 +1,6 @@
-# Runs the check gate (formatting, clippy and tests, via `nix flake check`)
-# on every push and pull request.
+# Runs the CI gate on every push and pull request, the same as `just ci`:
+# formatting and lints through `nix flake check`, then the tests in the
+# dev shell.
 name: ci
 
 on:
@@ -34,3 +35,8 @@ jobs:
 
       - name: Check
         run: nix flake check -L
+
+      - name: Test
+        env:
+          NEXTEST_PROFILE: ci
+        run: nix develop -c just test
