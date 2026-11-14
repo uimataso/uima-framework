@@ -8,7 +8,7 @@ pub trait Newtype {
     /// The type's name, as error messages show it.
     const NAME: &'static str;
     /// What can be wrong with a value, such as [`CountError`](crate::CountError). Its message
-    /// follows the type's name: "is already at 3".
+    /// follows the type's name: "can't exceed 3, received: 4".
     type Kind: fmt::Debug + fmt::Display;
 }
 
@@ -20,8 +20,8 @@ pub trait Newtype {
 /// uima_core::count!(pub Retries, max = 3);
 ///
 /// let error: Invalid<Retries> = Retries::new(3).unwrap().try_increment().unwrap_err();
-/// assert_eq!(error.kind(), &CountError::AtMax { max: 3 });
-/// assert_eq!(error.to_string(), "Retries is already at 3");
+/// assert_eq!(error.kind(), &CountError::AboveMax { received: 4, max: 3 });
+/// assert_eq!(error.to_string(), "Retries can't exceed 3, received: 4");
 /// ```
 pub struct Invalid<T: Newtype> {
     kind: T::Kind,
