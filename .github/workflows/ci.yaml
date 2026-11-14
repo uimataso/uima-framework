@@ -50,6 +50,7 @@ jobs:
       - name: Keep the build in the cache
         run: |
           system=$(nix eval --impure --raw --expr builtins.currentSystem)
+          mkdir -p .gcroots
           nix develop --profile .gcroots/dev-shell -c true
           nix eval --json ".#checks.$system" --apply builtins.attrNames \
             | jq -r --arg system "$system" '.[] | ".#checks.\($system).\(.)"' \
