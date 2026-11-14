@@ -3,8 +3,8 @@
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
-    fenix = {
-      url = "github:nix-community/fenix";
+    rust-overlay = {
+      url = "github:oxalica/rust-overlay";
       inputs.nixpkgs.follows = "nixpkgs";
     };
     treefmt-nix = {
@@ -17,7 +17,7 @@
     {
       self,
       nixpkgs,
-      fenix,
+      rust-overlay,
       treefmt-nix,
     }:
     let
@@ -31,14 +31,12 @@
       forAllSystems = lib.genAttrs systems;
 
       # The toolchain rust-toolchain.toml names, for both the dev shell and
-      # the checks. Bump `sha256` with the channel: set it to lib.fakeHash,
-      # and nix prints the right one.
+      # the checks. A release newer than the locked rust-overlay needs
+      # `nix flake update rust-overlay` first.
       toolchainFor =
         system:
-        fenix.packages.${system}.fromToolchainFile {
-          file = ./rust-toolchain.toml;
-          sha256 = "sha256-MFHoWVcPZKjFrLnQnodCXbUsfZcofGfo9tV9fTTvklg=";
-        };
+        (rust-overlay.lib.mkRustBin { } nixpkgs.legacyPackages.${system}).fromRustupToolchainFile
+          ./rust-toolchain.toml;
 
       # treefmt with every formatter in treefmt.nix.
       treefmtFor =
@@ -84,7 +82,7 @@
 
             cargoDeps = rustPlatform.importCargoLock { lockFile = ./Cargo.lock; };
 
-            nativeBuildInputs = with pkgs; [
+            nativeBuildInputs = [
               rustPlatform.cargoSetupHook
               toolchain
             ];

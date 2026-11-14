@@ -1,5 +1,6 @@
-# The one toolchain for the dev shell and `nix flake check` (via fenix).
-# Keep `channel` equal to `rust-version` in Cargo.toml.
+# The one toolchain for the dev shell, the checks and CI; flake.nix reads it.
+# `rust-version` in Cargo.toml is the oldest Rust the crates need, so it can
+# stay behind `channel`.
 [toolchain]
 channel = "1.100.0"
 components = ["rustfmt", "clippy", "rust-src", "rust-analyzer"]

@@ -19,6 +19,24 @@ Every project's `justfile` has these recipes, and adds its own (such as `run`) b
 `nix flake check` runs the same checks as `check`; the tests stay out of it (see [Tests](#tests)).
 Before a commit, run `just check test`.
 
+## Toolchain
+
+- **`rust-toolchain.toml`** at the repo root is the only place the Rust version is written. Copy
+  this repo's [`rust-toolchain.toml`](../rust-toolchain.toml), components included. It names an
+  exact release, not `stable`, so a new release's lints can't break a build that passed.
+- **`flake.nix`** reads it with [rust-overlay] for the build, the checks and the dev shell, so CI
+  gets the same release. See `toolchainFor` in this repo's [`flake.nix`](../flake.nix). A release
+  newer than the locked rust-overlay needs `nix flake update rust-overlay` first.
+- **Bumping**: each project bumps on its own schedule, within what
+  [depending on the framework](crates.md#depending-on-the-framework) allows.
+- **`rust-version`**: a library sets it to the oldest Rust it builds with. A service leaves it out;
+  its `rust-toolchain.toml` already says which Rust it uses.
+
+## Dev shell
+
+`nix develop` gives the toolchain and every tool the recipes run. A project adds the tools its own
+recipes and tests need beside them.
+
 ## Formatting
 
 Every file in the repo is formatted, not only Rust, with [treefmt] through [treefmt-nix].
@@ -72,5 +90,6 @@ rustc's and Clippy's default lints, plus a few more that the project's `Cargo.to
 [nextest]: https://nexte.st
 [nextest#16]: https://github.com/nextest-rs/nextest/issues/16
 [testcontainers]: https://github.com/testcontainers/testcontainers-rs
+[rust-overlay]: https://github.com/oxalica/rust-overlay
 [treefmt]: https://github.com/numtide/treefmt
 [treefmt-nix]: https://github.com/numtide/treefmt-nix
