@@ -32,9 +32,8 @@ pub async fn shutdown_signal() {
     }
 }
 
-/// Cancels `token` on a [`shutdown_signal`]. Returns once either happens, so it can be joined with
-/// the rest of the work without keeping the process up after that work has stopped the token
-/// itself.
+/// Cancels `token` on a [`shutdown_signal`]. Returns once the signal arrives or the token is
+/// cancelled elsewhere, so joining it doesn't keep the process up.
 pub async fn cancel_on_shutdown_signal(token: &CancelToken) {
     if shutdown_signal().until_cancelled(token).await.is_some() {
         token.cancel();

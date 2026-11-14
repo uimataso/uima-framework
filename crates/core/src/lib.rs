@@ -23,10 +23,9 @@
 //! assert!(serde_json::from_str::<GroupName>(r#""""#).is_err());
 //! ```
 //!
-//! `uid!` types do the same with `"String"`, and `count!` and `number!` types with `"i64"`. A
-//! `secret!` type derives only `Deserialize`, with `try_from = "String"`: serializing it would
-//! write the secret out. Don't derive `Default`, or `Deserialize` without `try_from`: both make a
-//! value the checks never saw.
+//! `uid!` types do the same with `"String"`, and `count!` and `number!` types with `"i64"`; see
+//! [`secret!`] for a secret. Don't derive `Default`, or `Deserialize` without `try_from`: both make
+//! a value the checks never saw.
 
 mod count;
 mod invalid;

@@ -25,8 +25,8 @@ pub trait Newtype {
 /// assert_eq!(error.to_string(), "Retries can't exceed 3, received: 4");
 /// ```
 ///
-/// To handle each kind, match on [`into_kind`](Self::into_kind). Matching on `kind()` goes
-/// through a reference, and then a `text!` type without a `rule` still needs a `Rule(_)` arm:
+/// To handle each kind, match on [`into_kind`](Self::into_kind). Matching on `kind()` needs a
+/// `Rule(_)` arm even for a `text!` type without a `rule`:
 ///
 /// ```
 /// use uima_core::{Invalid, TextErrorKind};

@@ -5,6 +5,7 @@ all build with.
 
 - Style guide: [docs/style-guide/](docs/style-guide/README.md)
 - Crate layout: [docs/crates.md](docs/crates.md)
+- Project setup: [docs/project-setup.md](docs/project-setup.md)
 - Agent and contributor rules: [AGENTS.md](AGENTS.md)
 
 ## Development

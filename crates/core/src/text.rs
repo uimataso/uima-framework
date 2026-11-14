@@ -328,12 +328,15 @@ macro_rules! text {
 /// );
 /// ```
 ///
-/// It takes the same options and runs the same checks, but reading it takes `expose` or
-/// `into_string`: it has no `Display`, `AsRef<str>`, `as_str`, ordering, or conversion into a
-/// `String`, and `Debug` prints `Name(***)`. Its errors' kind is a [`SecretErrorKind`], which leaves
-/// out the value and its length; a `rule`'s error type mustn't hold the value either. Comparing two
-/// with `==` isn't constant-time. With serde, derive only `Deserialize`, with
-/// `#[serde(try_from = "String")]`; serializing would write the secret out.
+/// It takes the same options and runs the same checks as [`text!`].
+///
+/// - Reading it takes `expose` or `into_string`. It has no `Display`, `AsRef<str>`, `as_str`,
+///   ordering, or conversion into a `String`, and `Debug` prints `Name(***)`.
+/// - Its errors' kind is a [`SecretErrorKind`], which leaves out the value and its length. A
+///   `rule`'s error type mustn't hold the value either.
+/// - Comparing two with `==` isn't constant-time.
+/// - With serde, derive only `Deserialize`, with `#[serde(try_from = "String")]`. Serializing would
+///   write the secret out.
 #[macro_export]
 macro_rules! secret {
     ($(#[$meta:meta])* $vis:vis $name:ident, $($options:tt)*) => {

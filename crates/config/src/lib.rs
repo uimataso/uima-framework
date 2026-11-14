@@ -32,9 +32,7 @@
 //! assert_eq!(config.workers, 4);
 //! ```
 //!
-//! A variable set to the empty string counts as unset, since compose files often write `VAR=` to
-//! mean that. Building the config from an [`Env`] rather than the process environment keeps it
-//! testable: tests pass [`Env::from_pairs`] and never touch the global environment.
+//! In tests, build the [`Env`] with [`Env::from_pairs`] instead of reading the process environment.
 
 mod env;
 

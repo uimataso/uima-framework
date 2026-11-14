@@ -4,24 +4,17 @@
 //! uima_log_tracing::init("info");
 //! ```
 //!
-//! The filter comes from `RUST_LOG` (see the [directive syntax]). When it is unset, empty or invalid,
-//! the default filter given here is used; an invalid one is warned about once the subscriber is
-//! up.
+//! The filter comes from `RUST_LOG` (see the [directive syntax]). When it is unset, empty or
+//! invalid, the default filter given here is used; an invalid one is warned about once the
+//! subscriber is up.
 //!
-//! Logs go to stdout, colored when stdout is a terminal. Log viewers that aren't terminals, such
-//! as cloud logging, show color codes as raw escapes, so the environment can override it, for
-//! example to turn colors on for `docker logs`:
+//! Logs go to stdout, colored when stdout is a terminal. The environment can override that:
 //!
-//! - `NO_COLOR` set: off ([no-color.org]).
-//! - `FORCE_COLOR` set: on, even with `NO_COLOR` set, as the [force-color.org] example code does.
+//! - `NO_COLOR` set: off.
+//! - `FORCE_COLOR` set: on, even with `NO_COLOR` set.
 //!
-//! A variable counts as set when it isn't empty, whatever its value, so `FORCE_COLOR=0` turns colors
-//! on too. `CLICOLOR` and `CLICOLOR_FORCE` are not read: [their standard][clicolors] is deprecated
-//! in favour of these two.
-//!
-//! [no-color.org]: https://no-color.org
-//! [clicolors]: https://bixense.com/clicolors/
-//! [force-color.org]: https://force-color.org
+//! A variable counts as set when it isn't empty, whatever its value, so `FORCE_COLOR=0` turns
+//! colors on too. `CLICOLOR` and `CLICOLOR_FORCE` are ignored.
 //!
 //! [directive syntax]: https://docs.rs/tracing-subscriber/latest/tracing_subscriber/filter/struct.EnvFilter.html#directives
 
@@ -120,7 +113,7 @@ where
 ///
 /// # Panics
 ///
-/// If `default` doesn't parse, even when `rust_log` is used: a bad default is a bug in the app.
+/// If `default` doesn't parse, even when `rust_log` is used.
 fn env_filter(rust_log: Option<&str>, default: &str) -> (EnvFilter, Option<ParseError>) {
     let default = EnvFilter::try_new(default)
         .unwrap_or_else(|error| panic!("invalid default filter {default:?}: {error}"));

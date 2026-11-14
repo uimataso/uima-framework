@@ -3,7 +3,8 @@
 ## Declaration order
 
 Rust doesn't need forward declarations, so order a file top to bottom for the reader: constants
-first, then public items before private ones, and high-level logic before the supporting types and functions it uses.
+first, then public items before private ones, and high-level logic before the supporting types and
+functions it uses.
 
 ```rust
 /// Length of an invite code.
@@ -67,8 +68,7 @@ uima_core::text!(
 - The field is private and the only way in is a constructor that checks the rule, so every
   `InviteCode` in the program is valid. Code that takes an `InviteCode` doesn't check again.
 - The constructor's error is `Invalid<InviteCode>`. Its message names the type and states the
-  rule. A `text!`'s may quote the character it rejected and the length it got; a `secret!`'s
-  leaves out both.
+  rule.
 - Convert at the edges: parse into the newtype where the value enters (an HTTP request, a database
   row, config) and turn it back into a primitive only where it leaves.
 - Don't add `Deref` to the inner type, which hands out the primitive and loses the point.

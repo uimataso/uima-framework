@@ -3,7 +3,7 @@
 use std::future::Future;
 use std::time::Duration;
 
-/// Puts a time limit on a future, as a method so it reads in order at the end of a chain.
+/// Puts a time limit on a future.
 pub trait TimeoutExt: Future + Sized {
     /// Runs the future for at most `duration`: `Ok` with its output if it finishes in time,
     /// otherwise `Err`, dropping the future. Same as [`tokio::time::timeout`].

@@ -7,8 +7,8 @@ use std::time::Duration;
 /// The result of a port call; `E` is the error the port's contract defines, none by default.
 pub type PortResult<T, E = !> = Result<T, PortError<E>>;
 
-/// Why a port call didn't succeed: an outcome its contract defines, such as not found, which callers
-/// handle case by case, or a [`Failure`] of whatever carries it out.
+/// Why a port call didn't succeed: an outcome its contract defines, such as not found, which
+/// callers handle case by case, or a [`Failure`] of whatever carries it out.
 ///
 /// A port whose contract defines no error uses `!`, so callers match only `Failed`:
 ///

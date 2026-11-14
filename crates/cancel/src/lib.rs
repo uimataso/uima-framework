@@ -17,11 +17,6 @@
 use std::future::Future;
 
 /// A cancellation token; clones share the same state.
-///
-/// It wraps tokio-util's [`CancellationToken`], so apps depend on this type and not on
-/// tokio-util's version.
-///
-/// [`CancellationToken`]: tokio_util::sync::CancellationToken
 #[derive(Clone, Debug, Default)]
 pub struct CancelToken(tokio_util::sync::CancellationToken);
 
@@ -45,8 +40,8 @@ impl CancelToken {
         self.0.is_cancelled()
     }
 
-    /// Completes once the token is cancelled. It owns a clone of the token, so it can be handed
-    /// on, e.g. to axum's `with_graceful_shutdown`.
+    /// Completes once the token is cancelled. The future is `'static`, so it can be handed on, e.g.
+    /// to axum's `with_graceful_shutdown`.
     pub fn cancelled(&self) -> impl Future<Output = ()> + Send + 'static {
         self.0.clone().cancelled_owned()
     }

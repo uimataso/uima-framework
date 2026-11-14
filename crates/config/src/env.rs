@@ -14,7 +14,7 @@ pub struct Env {
 }
 
 impl Env {
-    /// Reads `lookup`, a getter from variable name to value.
+    /// Reads variables through `lookup`.
     pub fn new(lookup: impl Fn(&str) -> Option<String> + Send + Sync + 'static) -> Self {
         Self {
             lookup: Box::new(lookup),
@@ -51,7 +51,7 @@ impl Env {
         Var { env: self, name }
     }
 
-    /// The value of `name`, or `None` when it is unset or empty.
+    /// The value of `name`, or `None` when it is unset.
     fn value(&self, name: &str) -> Option<String> {
         (self.lookup)(name).filter(|value| !value.is_empty())
     }
@@ -122,8 +122,7 @@ impl VarOr<'_> {
     ///
     /// # Panics
     ///
-    /// If the default doesn't parse, even when the variable is set: a bad default is a bug in the
-    /// code rather than in the environment, so it isn't an [`EnvError`].
+    /// If the default doesn't parse, even when the variable is set.
     pub fn parse<T, E>(self, parse: impl Fn(&str) -> Result<T, E>) -> Result<T, EnvError>
     where
         E: Error + Send + Sync + 'static,
@@ -169,10 +168,11 @@ impl<T> Parsed<'_, T> {
     }
 }
 
-/// A required variable is unset, or a variable didn't parse. The message names the variable; the
-/// parse error is its [`source`](Error::source), so print the error chain to see it. Neither adds
-/// the value, which may be a secret, though a parser's own error may quote it (jiff's time zone
-/// lookup does), so don't parse secrets with such a parser.
+/// A required variable is unset, or a variable didn't parse.
+///
+/// The message names the variable but not its value; the parse error is its
+/// [`source`](Error::source), so print the error chain to see it. A parser's own error may quote
+/// the value, so don't parse a secret with a parser whose errors do.
 #[derive(Debug)]
 pub struct EnvError {
     name: String,

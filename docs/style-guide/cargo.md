@@ -11,9 +11,8 @@ A crate has at most one cargo feature, and it is `testing`.
 
 ## Cargo.toml
 
-Dependencies go in hand-picked blocks separated by blank lines. `just fmt` runs
-`cargo sort --grouped`, which sorts within each block but keeps the blocks and their order, so
-choosing the blocks is up to you:
+Dependencies go in hand-picked blocks separated by blank lines. `just fmt` sorts within each block
+but keeps the blocks and their order, so choosing the blocks is up to you:
 
 ```toml
 [package]
