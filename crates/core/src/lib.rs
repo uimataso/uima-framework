@@ -1,4 +1,5 @@
-//! Value types every uima service shares: validating newtype macros and the port error.
+//! Value types every uima service shares: validating newtype macros, PATCH-style updates, and the
+//! port error.
 //!
 //! # Newtypes
 //!
@@ -33,6 +34,7 @@ mod number;
 mod port_error;
 mod text;
 mod uid;
+mod update;
 
 pub use count::CountErrorKind;
 pub use invalid::{Invalid, Newtype};
@@ -40,6 +42,7 @@ pub use number::NumberErrorKind;
 pub use port_error::{Failure, FailureKind, PortError, PortResult};
 pub use text::{SecretErrorKind, TextErrorKind};
 pub use uid::UidErrorKind;
+pub use update::{Changed, Update, UpdateOption};
 pub use uuid::Uuid;
 
 #[doc(hidden)]
