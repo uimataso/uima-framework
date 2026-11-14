@@ -14,19 +14,19 @@ use std::fmt;
 /// assert_eq!(EventCapacity::new(4).unwrap().get(), 4);
 /// assert_eq!(
 ///     EventCapacity::new(7).unwrap_err().to_string(),
-///     "EventCapacity must be 2..=6, received: 7",
+///     "EventCapacity must be between 2 and 6, received: 7",
 /// );
 /// ```
 ///
 /// `range` is an inclusive range of const expressions, such as `2..=6`, `-3..=3` or
-/// `1..=MAX_MEMBERS`. The type is `Copy` and ordered. It has:
+/// `1..=MAX_MEMBERS`. The type is `Copy`, ordered, and hashable. It has:
 ///
 /// - `MIN`, `MAX`, and `new`, which rejects a value outside `MIN..=MAX`.
 /// - `get`.
 /// - `try_add` and `try_sub`, which fail outside `MIN..=MAX`.
 /// - `TryFrom<i64>`, `From<Name> for i64`, and `Display`.
 ///
-/// Its errors are [`Invalid<Name>`](crate::Invalid), whose kind is a [`NumberError`].
+/// Its errors are [`Invalid<Name>`](crate::Invalid), whose kind is a [`NumberErrorKind`].
 ///
 /// # Limits
 ///
@@ -67,11 +67,12 @@ macro_rules! number {
         $vis struct $name($t);
 
         impl $name {
+            /// The lowest number it takes.
             pub const MIN: $t = *::core::ops::RangeInclusive::<$t>::start(&$range);
+            /// The highest number it takes.
             pub const MAX: $t = *::core::ops::RangeInclusive::<$t>::end(&$range);
 
-            /// `number`, or [`OutOfRange`]($crate::NumberError::OutOfRange) outside
-            /// `MIN..=MAX`.
+            /// `number`, or `OutOfRange` outside `MIN..=MAX`.
             pub const fn new(number: $t) -> ::core::result::Result<Self, $crate::Invalid<Self>> {
                 if number < Self::MIN || number > Self::MAX {
                     return ::core::result::Result::Err(Self::out_of_range(
@@ -81,16 +82,17 @@ macro_rules! number {
                 ::core::result::Result::Ok(Self(number))
             }
 
+            /// The number itself.
             pub const fn get(self) -> $t {
                 self.0
             }
 
-            /// `n` more, or [`OutOfRange`]($crate::NumberError::OutOfRange) outside `MIN..=MAX`.
+            /// `n` more, or `OutOfRange` outside `MIN..=MAX`.
             pub const fn try_add(self, n: $t) -> ::core::result::Result<Self, $crate::Invalid<Self>> {
                 Self::from_wide(self.0 as ::core::primitive::i128 + n as ::core::primitive::i128)
             }
 
-            /// `n` less, or [`OutOfRange`]($crate::NumberError::OutOfRange) outside `MIN..=MAX`.
+            /// `n` less, or `OutOfRange` outside `MIN..=MAX`.
             pub const fn try_sub(self, n: $t) -> ::core::result::Result<Self, $crate::Invalid<Self>> {
                 Self::from_wide(self.0 as ::core::primitive::i128 - n as ::core::primitive::i128)
             }
@@ -108,7 +110,7 @@ macro_rules! number {
             }
 
             const fn out_of_range(received: ::core::primitive::i128) -> $crate::Invalid<Self> {
-                $crate::Invalid::new($crate::NumberError::OutOfRange {
+                $crate::Invalid::new($crate::NumberErrorKind::OutOfRange {
                     received,
                     min: Self::MIN as ::core::primitive::i64,
                     max: Self::MAX as ::core::primitive::i64,
@@ -159,22 +161,23 @@ macro_rules! number {
 
         impl $crate::Newtype for $name {
             const NAME: &'static ::core::primitive::str = ::core::stringify!($name);
-            type Kind = $crate::NumberError;
+            type Kind = $crate::NumberErrorKind;
         }
     };
 }
 
 /// What is wrong with a number.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum NumberError {
+pub enum NumberErrorKind {
+    /// Outside `min..=max`.
     OutOfRange { received: i128, min: i64, max: i64 },
 }
 
-impl fmt::Display for NumberError {
+impl fmt::Display for NumberErrorKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::OutOfRange { received, min, max } => {
-                write!(f, "must be {min}..={max}, received: {received}")
+                write!(f, "must be between {min} and {max}, received: {received}")
             }
         }
     }
@@ -201,10 +204,10 @@ mod tests {
     crate::number!(Wide, u32, range = 1..=u32::MAX);
     crate::number!(Limit, u32, range = 1..=LIMIT);
 
-    fn rejected<T, N>(result: Result<T, Invalid<N>>) -> NumberError
+    fn rejected<T, N>(result: Result<T, Invalid<N>>) -> NumberErrorKind
     where
         T: fmt::Debug,
-        N: Newtype<Kind = NumberError>,
+        N: Newtype<Kind = NumberErrorKind>,
     {
         result.unwrap_err().into_kind()
     }
@@ -222,7 +225,7 @@ mod tests {
         check!(Capacity::new(6).unwrap().get() == 6);
         check!(
             rejected(Capacity::new(1))
-                == NumberError::OutOfRange {
+                == NumberErrorKind::OutOfRange {
                     received: 1,
                     min: 2,
                     max: 6
@@ -230,7 +233,7 @@ mod tests {
         );
         check!(
             rejected(Capacity::new(7))
-                == NumberError::OutOfRange {
+                == NumberErrorKind::OutOfRange {
                     received: 7,
                     min: 2,
                     max: 6
@@ -238,7 +241,7 @@ mod tests {
         );
         check!(
             rejected(Below::new(0))
-                == NumberError::OutOfRange {
+                == NumberErrorKind::OutOfRange {
                     received: 0,
                     min: -9,
                     max: -1
@@ -257,7 +260,7 @@ mod tests {
     fn try_from_rejects_an_i64_the_type_cant_hold() {
         check!(
             rejected(Capacity::try_from(-1_i64))
-                == NumberError::OutOfRange {
+                == NumberErrorKind::OutOfRange {
                     received: -1,
                     min: 2,
                     max: 6
@@ -265,7 +268,7 @@ mod tests {
         );
         check!(
             rejected(Size::try_from(i64::MIN))
-                == NumberError::OutOfRange {
+                == NumberErrorKind::OutOfRange {
                     received: i64::MIN.into(),
                     min: 0,
                     max: 10
@@ -290,7 +293,7 @@ mod tests {
         check!(three.try_sub(1) == Capacity::new(2));
         check!(
             rejected(three.try_add(4))
-                == NumberError::OutOfRange {
+                == NumberErrorKind::OutOfRange {
                     received: 7,
                     min: 2,
                     max: 6
@@ -298,7 +301,7 @@ mod tests {
         );
         check!(
             rejected(three.try_sub(5))
-                == NumberError::OutOfRange {
+                == NumberErrorKind::OutOfRange {
                     received: -2,
                     min: 2,
                     max: 6
@@ -307,7 +310,7 @@ mod tests {
         let top = Big::new(i64::MAX).unwrap();
         check!(
             rejected(top.try_add(i64::MAX))
-                == NumberError::OutOfRange {
+                == NumberErrorKind::OutOfRange {
                     received: 2 * i128::from(i64::MAX),
                     min: 0,
                     max: i64::MAX
@@ -323,17 +326,20 @@ mod tests {
 
     #[test]
     fn error_names_its_type() {
-        check!(Capacity::new(7).unwrap_err().to_string() == "Capacity must be 2..=6, received: 7");
+        check!(
+            Capacity::new(7).unwrap_err().to_string()
+                == "Capacity must be between 2 and 6, received: 7"
+        );
         check!(
             Size::new(u64::MAX).unwrap_err().to_string()
-                == format!("Size must be 0..=10, received: {}", u64::MAX)
+                == format!("Size must be between 0 and 10, received: {}", u64::MAX)
         );
     }
 }
 
 #[cfg(test)]
 mod props {
-    use super::NumberError;
+    use super::NumberErrorKind;
 
     crate::number!(Capacity, u32, range = 2..=6);
     crate::number!(Offset, i16, range = -3..=3);
@@ -378,7 +384,7 @@ mod props {
                                 prop_assert!(!($number::MIN..=$number::MAX).contains(&n));
                                 prop_assert_eq!(
                                     error.into_kind(),
-                                    NumberError::OutOfRange {
+                                    NumberErrorKind::OutOfRange {
                                         received: n.into(),
                                         min: $number::MIN.into(),
                                         max: $number::MAX.into(),
@@ -398,7 +404,7 @@ mod props {
                                 prop_assert!(!in_range);
                                 prop_assert_eq!(
                                     error.into_kind(),
-                                    NumberError::OutOfRange {
+                                    NumberErrorKind::OutOfRange {
                                         received: n.into(),
                                         min: $number::MIN.into(),
                                         max: $number::MAX.into(),
@@ -425,7 +431,7 @@ mod props {
                                     prop_assert!(!range.contains(&wide));
                                     prop_assert_eq!(
                                         error.into_kind(),
-                                        NumberError::OutOfRange {
+                                        NumberErrorKind::OutOfRange {
                                             received: wide,
                                             min: $number::MIN.into(),
                                             max: $number::MAX.into(),
@@ -468,7 +474,7 @@ mod shadowed {
     struct i128;
     struct str;
     struct Invalid;
-    struct NumberError;
+    struct NumberErrorKind;
     trait Newtype {}
     type Result<T> = core::result::Result<T, ()>;
     macro_rules! assert {

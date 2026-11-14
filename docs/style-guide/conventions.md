@@ -53,27 +53,22 @@ a count that can't go negative, a name with a length limit. The compiler then ca
 passed where an invitation ID is expected, and a value that exists is a value that was checked.
 
 ```rust
-/// An invitation code: `INVITE_CODE_LEN` characters from `INVITE_CODE_CHARS`.
-pub struct InviteCode(String);
-
-impl InviteCode {
-    pub fn new(raw: &str) -> Result<Self, InvalidInviteCode> { ... }
-
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
-
-#[derive(Debug, thiserror::Error)]
-#[error("invite code must be {INVITE_CODE_LEN} letters or digits, without I, O, 0 or 1")]
-pub struct InvalidInviteCode;
+uima_core::text!(
+    /// An invitation code: `INVITE_CODE_LEN` characters from `INVITE_CODE_CHARS`.
+    pub InviteCode,
+    len = INVITE_CODE_LEN..=INVITE_CODE_LEN,
+    chars = |c| c.is_ascii() && INVITE_CODE_CHARS.contains(&(c as u8)),
+);
 ```
 
+- Define it with a `uima-core` macro: `uid!` for an ID, `count!` for a count, `number!` for an
+  integer within a range, `text!` for a string, and `secret!` for a string that must stay out of
+  logs, such as a password or a token.
 - The field is private and the only way in is a constructor that checks the rule, so every
   `InviteCode` in the program is valid. Code that takes an `InviteCode` doesn't check again.
-- The constructor returns a `Result` with an error type named for the newtype (`InvalidInviteCode`).
-  Its message states the rule and never quotes the input, which may be a secret or user data.
+- The constructor's error is `Invalid<InviteCode>`. Its message names the type and states the
+  rule. A `text!`'s may quote the character it rejected and the length it got; a `secret!`'s
+  leaves out both.
 - Convert at the edges: parse into the newtype where the value enters (an HTTP request, a database
   row, config) and turn it back into a primitive only where it leaves.
-- Add only the conversions callers need (`as_str`, `Display`, `From<InviteCode> for String`);
-  don't derive `Deref` to the inner type, which hands out the primitive and loses the point.
+- Don't add `Deref` to the inner type, which hands out the primitive and loses the point.

@@ -45,6 +45,7 @@ pub struct Failure {
 
 /// What happened, as far as the adapter can tell.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum FailureKind {
     /// Lost to a concurrent operation on the same data, and undone: a serialization failure or
     /// deadlock, or a version or etag that no longer matches. Not a problem with the data itself.
@@ -55,10 +56,12 @@ pub enum FailureKind {
     Unavailable,
     /// The other side refused because of too many requests.
     RateLimited,
+    /// None of the above, or the adapter can't tell.
     Other,
 }
 
 impl Failure {
+    /// A failure of the given kind, with no wait set.
     pub fn new(kind: FailureKind, source: impl Into<anyhow::Error>) -> Self {
         Self {
             kind,
@@ -83,10 +86,12 @@ impl Failure {
         self
     }
 
+    /// What happened.
     pub fn kind(&self) -> FailureKind {
         self.kind
     }
 
+    /// How long the other side asked to wait, if it said.
     pub fn retry_after(&self) -> Option<Duration> {
         self.retry_after
     }

@@ -27,14 +27,15 @@ use std::fmt;
 /// - `TryFrom<String>`, `TryFrom<&str>`, and `FromStr`.
 /// - `Display`, and `Debug` as `Name("text")`.
 ///
-/// Its errors are [`Invalid<Name>`](crate::Invalid), whose kind is a [`TextError`].
+/// Its errors are [`Invalid<Name>`](crate::Invalid), whose kind is a [`TextErrorKind`].
 ///
 /// # Options
 ///
 /// `len` and `chars` are required, and the options come in any order. `trim = false` keeps the
-/// whitespace around the text. `rule: R = f` adds a check of the whole
-/// text, where `f` is a `fn(&str) -> Result<(), R>` or a closure that captures nothing. `R` is
-/// the [`TextError::Rule`] it returns, and its message follows the type's name:
+/// whitespace around the text. `rule: R = f` adds a check of the whole text, where `f` is a
+/// `fn(&str) -> Result<(), R>` or a closure that captures nothing. `R` is the
+/// [`TextErrorKind::Rule`] it returns; it implements `Debug` and `Display`, and its message
+/// follows the type's name:
 ///
 /// ```
 /// use std::fmt;
@@ -91,6 +92,24 @@ macro_rules! text {
             @options $mode $head $len $chars $trim [$($rule)* ($rule_type = $value)] $($($rest)*)?
         );
     };
+    (@options $mode:ident $head:tt $len:tt $chars:tt $trim:tt $rule:tt len $($rest:tt)*) => {
+        $crate::text!(@malformed $mode "len = a..=b");
+    };
+    (@options $mode:ident $head:tt $len:tt $chars:tt $trim:tt $rule:tt chars $($rest:tt)*) => {
+        $crate::text!(@malformed $mode "chars = f");
+    };
+    (@options $mode:ident $head:tt $len:tt $chars:tt $trim:tt $rule:tt trim $($rest:tt)*) => {
+        $crate::text!(@malformed $mode "trim = bool");
+    };
+    (@options $mode:ident $head:tt $len:tt $chars:tt $trim:tt $rule:tt rule $($rest:tt)*) => {
+        $crate::text!(@malformed $mode "rule: R = f");
+    };
+    (@malformed $mode:ident $expected:literal) => {
+        ::core::compile_error!(::core::concat!(
+            "couldn't read an option of ", ::core::stringify!($mode), "!: expected `", $expected,
+            "`, followed by `,` or the end",
+        ));
+    };
     (@options $mode:ident $head:tt $len:tt $chars:tt $trim:tt $rule:tt $key:tt $($rest:tt)*) => {
         ::core::compile_error!(::core::concat!(
             "unknown option `", ::core::stringify!($key), "` of ", ::core::stringify!($mode),
@@ -121,6 +140,7 @@ macro_rules! text {
 
     (@extras text $name:ident) => {
         impl $name {
+            /// The text itself.
             pub fn as_str(&self) -> &::core::primitive::str {
                 &self.0
             }
@@ -152,13 +172,15 @@ macro_rules! text {
 
         impl ::core::fmt::Display for $name {
             fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
-                f.write_str(&self.0)
+                f.pad(&self.0)
             }
         }
 
         impl ::core::fmt::Debug for $name {
             fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
-                f.debug_tuple(::core::stringify!($name)).field(&self.0).finish()
+                let mut tuple = ::core::fmt::Formatter::debug_tuple(f, ::core::stringify!($name));
+                ::core::fmt::DebugTuple::field(&mut tuple, &self.0);
+                ::core::fmt::DebugTuple::finish(&mut tuple)
             }
         }
     };
@@ -180,10 +202,10 @@ macro_rules! text {
     (@trim) => { true };
     (@trim $trim:expr) => { $trim };
 
-    (@kind text) => { $crate::TextError };
-    (@kind text $rule_type:ty) => { $crate::TextError<$rule_type> };
-    (@kind secret) => { $crate::SecretError };
-    (@kind secret $rule_type:ty) => { $crate::SecretError<$rule_type> };
+    (@kind text) => { $crate::TextErrorKind };
+    (@kind text $rule_type:ty) => { $crate::TextErrorKind<$rule_type> };
+    (@kind secret) => { $crate::SecretErrorKind };
+    (@kind secret $rule_type:ty) => { $crate::SecretErrorKind<$rule_type> };
 
     (@rule) => { |_| ::core::result::Result::<(), !>::Ok(()) };
     (@rule $rule_type:ty = $rule:expr) => {{
@@ -205,10 +227,10 @@ macro_rules! text {
         $vis struct $name(::std::string::String);
 
         impl $name {
-            /// The fewest characters it takes, once trimmed.
+            /// The fewest characters it takes.
             pub const MIN_LENGTH: ::core::primitive::usize =
                 *::core::ops::RangeInclusive::<::core::primitive::usize>::start(&$len);
-            /// The most characters it takes, once trimmed.
+            /// The most characters it takes.
             pub const MAX_LENGTH: ::core::primitive::usize =
                 *::core::ops::RangeInclusive::<::core::primitive::usize>::end(&$len);
 
@@ -216,8 +238,19 @@ macro_rules! text {
             pub fn new(
                 text: impl ::core::convert::AsRef<::core::primitive::str>,
             ) -> ::core::result::Result<Self, $crate::Invalid<Self>> {
-                let text = text.as_ref();
-                let text = if $trim { text.trim() } else { text };
+                let text = Self::checked(text.as_ref())?;
+                ::core::result::Result::Ok(Self(::std::borrow::ToOwned::to_owned(text)))
+            }
+
+            /// The text as an owned `String`.
+            pub fn into_string(self) -> ::std::string::String {
+                self.0
+            }
+
+            fn checked(
+                text: &::core::primitive::str,
+            ) -> ::core::result::Result<&::core::primitive::str, $crate::Invalid<Self>> {
+                let text = if $trim { ::core::primitive::str::trim(text) } else { text };
                 let chars: fn(::core::primitive::char) -> ::core::primitive::bool = $chars;
                 let checked = $crate::__private::check_text(
                     text,
@@ -227,17 +260,11 @@ macro_rules! text {
                     $crate::text!(@rule $($rule_type = $rule)?),
                 );
                 match checked {
-                    ::core::result::Result::Ok(()) => {
-                        ::core::result::Result::Ok(Self(::std::borrow::ToOwned::to_owned(text)))
-                    }
+                    ::core::result::Result::Ok(()) => ::core::result::Result::Ok(text),
                     ::core::result::Result::Err(error) => ::core::result::Result::Err(
                         $crate::Invalid::new(::core::convert::From::from(error)),
                     ),
                 }
-            }
-
-            pub fn into_string(self) -> ::std::string::String {
-                self.0
             }
         }
 
@@ -250,7 +277,11 @@ macro_rules! text {
             type Error = $crate::Invalid<Self>;
 
             fn try_from(text: ::std::string::String) -> ::core::result::Result<Self, Self::Error> {
-                Self::new(text)
+                let checked = Self::checked(&text)?;
+                if checked.len() == text.len() {
+                    return ::core::result::Result::Ok(Self(text));
+                }
+                ::core::result::Result::Ok(Self(::std::borrow::ToOwned::to_owned(checked)))
             }
         }
 
@@ -299,8 +330,10 @@ macro_rules! text {
 ///
 /// It takes the same options and runs the same checks, but reading it takes `expose` or
 /// `into_string`: it has no `Display`, `AsRef<str>`, `as_str`, ordering, or conversion into a
-/// `String`, and `Debug` prints `Name(***)`. Its errors' kind is a [`SecretError`], which leaves
-/// out the value and its length. Comparing two with `==` isn't constant-time.
+/// `String`, and `Debug` prints `Name(***)`. Its errors' kind is a [`SecretErrorKind`], which leaves
+/// out the value and its length; a `rule`'s error type mustn't hold the value either. Comparing two
+/// with `==` isn't constant-time. With serde, derive only `Deserialize`, with
+/// `#[serde(try_from = "String")]`; serializing would write the secret out.
 #[macro_export]
 macro_rules! secret {
     ($(#[$meta:meta])* $vis:vis $name:ident, $($options:tt)*) => {
@@ -310,44 +343,37 @@ macro_rules! secret {
 
 /// What is wrong with a text.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum TextError<R = !> {
-    TooShort {
-        min: usize,
-        received: usize,
-    },
-    TooLong {
-        max: usize,
-    },
+pub enum TextErrorKind<R = !> {
+    /// Fewer than `min` characters.
+    TooShort { min: usize, received: usize },
+    /// More than `max` characters.
+    TooLong { max: usize },
     /// Has a character `chars` doesn't allow.
-    Char {
-        received: char,
-    },
+    Char { received: char },
     /// Fails the type's `rule`.
     Rule(R),
 }
 
 /// What is wrong with a secret, leaving out the value and its length.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SecretError<R = !> {
-    TooShort {
-        min: usize,
-    },
-    TooLong {
-        max: usize,
-    },
+pub enum SecretErrorKind<R = !> {
+    /// Fewer than `min` characters.
+    TooShort { min: usize },
+    /// More than `max` characters.
+    TooLong { max: usize },
     /// Has a character `chars` doesn't allow.
     Char,
     /// Fails the type's `rule`.
     Rule(R),
 }
 
-impl<R: fmt::Display> fmt::Display for TextError<R> {
+impl<R: fmt::Display> fmt::Display for TextErrorKind<R> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::TooShort { min, received } => {
                 write!(
                     f,
-                    "must have at least {}, it has {received}",
+                    "must have at least {}, received: {received}",
                     characters(*min)
                 )
             }
@@ -358,7 +384,7 @@ impl<R: fmt::Display> fmt::Display for TextError<R> {
     }
 }
 
-impl<R: fmt::Display> fmt::Display for SecretError<R> {
+impl<R: fmt::Display> fmt::Display for SecretErrorKind<R> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::TooShort { min } => write!(f, "must have at least {}", characters(*min)),
@@ -369,13 +395,13 @@ impl<R: fmt::Display> fmt::Display for SecretError<R> {
     }
 }
 
-impl<R> From<TextError<R>> for SecretError<R> {
-    fn from(error: TextError<R>) -> Self {
+impl<R> From<TextErrorKind<R>> for SecretErrorKind<R> {
+    fn from(error: TextErrorKind<R>) -> Self {
         match error {
-            TextError::TooShort { min, .. } => Self::TooShort { min },
-            TextError::TooLong { max } => Self::TooLong { max },
-            TextError::Char { .. } => Self::Char,
-            TextError::Rule(rule) => Self::Rule(rule),
+            TextErrorKind::TooShort { min, .. } => Self::TooShort { min },
+            TextErrorKind::TooLong { max } => Self::TooLong { max },
+            TextErrorKind::Char { .. } => Self::Char,
+            TextErrorKind::Rule(rule) => Self::Rule(rule),
         }
     }
 }
@@ -395,22 +421,22 @@ pub fn check<R>(
     max: usize,
     chars: fn(char) -> bool,
     rule: fn(&str) -> Result<(), R>,
-) -> Result<(), TextError<R>> {
+) -> Result<(), TextErrorKind<R>> {
     // Counts at most one past `max`, so a long text costs no more than a valid one.
     let length = text.chars().take(max.saturating_add(1)).count();
     if length < min {
-        return Err(TextError::TooShort {
+        return Err(TextErrorKind::TooShort {
             min,
             received: length,
         });
     }
     if length > max {
-        return Err(TextError::TooLong { max });
+        return Err(TextErrorKind::TooLong { max });
     }
     if let Some(received) = text.chars().find(|&c| !chars(c)) {
-        return Err(TextError::Char { received });
+        return Err(TextErrorKind::Char { received });
     }
-    rule(text).map_err(TextError::Rule)
+    rule(text).map_err(TextErrorKind::Rule)
 }
 
 #[cfg(test)]
@@ -489,18 +515,18 @@ mod tests {
     fn checks_the_length_once_trimmed() {
         check!(
             rejected(Name::new("   "))
-                == TextError::TooShort {
+                == TextErrorKind::TooShort {
                     min: 1,
                     received: 0
                 }
         );
-        check!(rejected(Spaced::new("      ")) == TextError::TooLong { max: 5 });
+        check!(rejected(Spaced::new("      ")) == TextErrorKind::TooLong { max: 5 });
     }
 
     #[test]
     fn counts_the_length_in_characters() {
         check!(Name::new("測試測試測").unwrap().as_str() == "測試測試測");
-        check!(rejected(Name::new("測試測試測試")) == TextError::TooLong { max: 5 });
+        check!(rejected(Name::new("測試測試測試")) == TextErrorKind::TooLong { max: 5 });
     }
 
     #[test]
@@ -516,32 +542,32 @@ mod tests {
 
     #[test]
     fn rejects_characters_it_doesnt_allow() {
-        check!(rejected(Name::new("a\nb")) == TextError::Char { received: '\n' });
+        check!(rejected(Name::new("a\nb")) == TextErrorKind::Char { received: '\n' });
         check!(Name::new("a b").is_ok());
         check!(Note::new("a\nb").unwrap().as_str() == "a\nb");
-        check!(rejected(Note::new("a\tb")) == TextError::Char { received: '\t' });
+        check!(rejected(Note::new("a\tb")) == TextErrorKind::Char { received: '\t' });
     }
 
     #[test]
     fn runs_its_rule() {
         check!(Code::new("120").unwrap().as_str() == "120");
-        check!(rejected(Code::new("012")) == TextError::Rule(Digits::LeadingZero));
+        check!(rejected(Code::new("012")) == TextErrorKind::Rule(Digits::LeadingZero));
         check!(Lower::new("ab").is_ok());
-        check!(rejected(Lower::new("no")) == TextError::Rule(Digits::LeadingZero));
+        check!(rejected(Lower::new("no")) == TextErrorKind::Rule(Digits::LeadingZero));
     }
 
     #[test]
     fn takes_its_options_in_any_order() {
         check!((Reordered::MIN_LENGTH, Reordered::MAX_LENGTH) == (1, 3));
         check!(Reordered::new("12").is_ok());
-        check!(rejected(Reordered::new(" 12")) == TextError::Char { received: ' ' });
-        check!(rejected(Reordered::new("012")) == TextError::Rule(Digits::LeadingZero));
+        check!(rejected(Reordered::new(" 12")) == TextErrorKind::Char { received: ' ' });
+        check!(rejected(Reordered::new("012")) == TextErrorKind::Rule(Digits::LeadingZero));
     }
 
     #[test]
     fn checks_length_then_characters_then_rule() {
-        check!(rejected(Code::new("0a0a0a")) == TextError::TooLong { max: 5 });
-        check!(rejected(Code::new("0a")) == TextError::Char { received: 'a' });
+        check!(rejected(Code::new("0a0a0a")) == TextErrorKind::TooLong { max: 5 });
+        check!(rejected(Code::new("0a")) == TextErrorKind::Char { received: 'a' });
     }
 
     #[test]
@@ -554,6 +580,27 @@ mod tests {
     }
 
     #[test]
+    fn try_from_a_string_keeps_it_unless_trimmed() {
+        let text = String::from("ab");
+        let address = text.as_ptr();
+        let kept = Name::try_from(text).unwrap().into_string();
+        check!(kept.as_ptr() == address);
+        check!(Name::try_from(String::from(" ab ")).unwrap().as_str() == "ab");
+        check!(
+            rejected(Name::try_from(String::from("  ")))
+                == TextErrorKind::TooShort {
+                    min: 1,
+                    received: 0
+                }
+        );
+    }
+
+    #[test]
+    fn display_pads_like_a_str() {
+        check!(format!("[{:>4}]", Name::new("ab").unwrap()) == "[  ab]");
+    }
+
+    #[test]
     fn debug_shows_the_text() {
         check!(format!("{:?}", Name::new("ab").unwrap()) == r#"Name("ab")"#);
     }
@@ -562,7 +609,7 @@ mod tests {
     fn error_names_its_type() {
         check!(
             Name::new("").unwrap_err().to_string()
-                == "Name must have at least 1 character, it has 0"
+                == "Name must have at least 1 character, received: 0"
         );
         check!(
             Single::new("ab").unwrap_err().to_string() == "Single must have at most 1 character"
@@ -587,10 +634,10 @@ mod tests {
 
     #[test]
     fn secret_errors_leave_out_the_value() {
-        check!(rejected(Token::new("a")) == SecretError::TooShort { min: 2 });
-        check!(rejected(Token::new("abcdef")) == SecretError::TooLong { max: 5 });
-        check!(rejected(Token::new("a\u{1}b")) == SecretError::Char);
-        check!(rejected(Pin::new("012")) == SecretError::Rule(Digits::LeadingZero));
+        check!(rejected(Token::new("a")) == SecretErrorKind::TooShort { min: 2 });
+        check!(rejected(Token::new("abcdef")) == SecretErrorKind::TooLong { max: 5 });
+        check!(rejected(Token::new("a\u{1}b")) == SecretErrorKind::Char);
+        check!(rejected(Pin::new("012")) == SecretErrorKind::Rule(Digits::LeadingZero));
         check!(Token::new("a").unwrap_err().to_string() == "Token must have at least 2 characters");
         check!(
             Token::new("abcdef").unwrap_err().to_string() == "Token must have at most 5 characters"
@@ -640,19 +687,19 @@ mod props {
     }
 
     /// The checks, spelled out.
-    fn expected(text: &str) -> Result<String, TextError> {
+    fn expected(text: &str) -> Result<String, TextErrorKind> {
         let length = text.chars().count();
         if length < 1 {
-            return Err(TextError::TooShort {
+            return Err(TextErrorKind::TooShort {
                 min: 1,
                 received: length,
             });
         }
         if length > 5 {
-            return Err(TextError::TooLong { max: 5 });
+            return Err(TextErrorKind::TooLong { max: 5 });
         }
         match text.chars().find(|c| c.is_control()) {
-            Some(received) => Err(TextError::Char { received }),
+            Some(received) => Err(TextErrorKind::Char { received }),
             None => Ok(text.to_owned()),
         }
     }
@@ -667,7 +714,7 @@ mod props {
         #[test]
         fn secret_checks_like_text_without_the_value(raw in text()) {
             let got = Token::new(&raw).map(Token::into_string).map_err(|e| e.into_kind());
-            prop_assert_eq!(got, expected(&raw).map_err(SecretError::from));
+            prop_assert_eq!(got, expected(&raw).map_err(SecretErrorKind::from));
         }
     }
 }
@@ -688,10 +735,19 @@ mod shadowed {
     struct usize;
     struct Option;
     struct Invalid;
-    struct TextError;
-    struct SecretError;
+    struct TextErrorKind;
+    struct SecretErrorKind;
     trait Newtype {}
     trait ToOwned {}
+    trait Methods {
+        fn field(&self, _: &i32) {}
+        fn finish(&self) {}
+        fn len(&self) {}
+        fn trim(&self) {}
+        fn pad(&self, _: &i32) {}
+        fn as_ref(&self) {}
+    }
+    impl<T: ?Sized> Methods for T {}
     type Result<T> = core::result::Result<T, ()>;
     macro_rules! write {
         ($($t:tt)*) => {

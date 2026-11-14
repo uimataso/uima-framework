@@ -3,11 +3,12 @@
 use std::error::Error;
 use std::fmt;
 
-/// A newtype the macros define; the macros implement it.
+/// A newtype whose errors are [`Invalid<Self>`](Invalid). The macros implement it, and a
+/// hand-written newtype can too.
 pub trait Newtype {
     /// The type's name, as error messages show it.
     const NAME: &'static str;
-    /// What can be wrong with a value, such as [`CountError`](crate::CountError). Its message
+    /// What can be wrong with a value, such as [`CountErrorKind`](crate::CountErrorKind). Its message
     /// follows the type's name: "can't exceed 3, received: 4".
     type Kind: fmt::Debug + fmt::Display;
 }
@@ -15,27 +16,49 @@ pub trait Newtype {
 /// A value `T` rejects; [`kind`](Self::kind) tells what was wrong.
 ///
 /// ```
-/// use uima_core::{CountError, Invalid};
+/// use uima_core::{CountErrorKind, Invalid};
 ///
 /// uima_core::count!(pub Retries, max = 3);
 ///
 /// let error: Invalid<Retries> = Retries::new(3).unwrap().try_increment().unwrap_err();
-/// assert_eq!(error.kind(), &CountError::AboveMax { received: 4, max: 3 });
+/// assert_eq!(error.kind(), &CountErrorKind::AboveMax { received: 4, max: 3 });
 /// assert_eq!(error.to_string(), "Retries can't exceed 3, received: 4");
+/// ```
+///
+/// To handle each kind, match on [`into_kind`](Self::into_kind). Matching on `kind()` goes
+/// through a reference, and then a `text!` type without a `rule` still needs a `Rule(_)` arm:
+///
+/// ```
+/// use uima_core::{Invalid, TextErrorKind};
+///
+/// uima_core::text!(pub Title, len = 1..=80, chars = |c| !c.is_control());
+///
+/// fn reason(error: Invalid<Title>) -> &'static str {
+///     match error.into_kind() {
+///         TextErrorKind::TooShort { .. } => "empty",
+///         TextErrorKind::TooLong { .. } => "too long",
+///         TextErrorKind::Char { .. } => "has a control character",
+///     }
+/// }
+///
+/// assert_eq!(reason(Title::new("").unwrap_err()), "empty");
 /// ```
 pub struct Invalid<T: Newtype> {
     kind: T::Kind,
 }
 
 impl<T: Newtype> Invalid<T> {
+    /// An error of the given kind.
     pub const fn new(kind: T::Kind) -> Self {
         Self { kind }
     }
 
+    /// What was wrong.
     pub const fn kind(&self) -> &T::Kind {
         &self.kind
     }
 
+    /// What was wrong, by value, to match on.
     pub fn into_kind(self) -> T::Kind {
         self.kind
     }

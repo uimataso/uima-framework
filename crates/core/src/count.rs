@@ -16,29 +16,31 @@ use std::fmt;
 /// assert_eq!(comments.decrement().decrement(), CommentCount::ZERO);
 /// ```
 ///
-/// The type is `Copy`, ordered, and `Default` to zero. It has:
+/// The type is `Copy`, ordered, hashable, and `Default` to zero. It has:
 ///
-/// - `ZERO`, `MAX`, and `new`, which rejects a value above `MAX`.
+/// - `ZERO`, a count of zero, and `MAX`, the highest count as a `u64`.
+/// - `new`, which rejects a value above `MAX`.
 /// - `get` and `is_zero`.
 /// - `remaining`, how many more fit before `MAX`.
-/// - `increment`, `decrement`, `add` and `sub`, which stop at `MAX` and at zero.
+/// - `increment`, `decrement`, `saturating_add` and `saturating_sub`, which stop at `MAX` and at
+///   zero.
 /// - `try_increment`, `try_decrement`, `try_add` and `try_sub`, which fail there instead.
 /// - `TryFrom<i64>`, `From<Name> for i64`, and `Display`.
 ///
-/// Its errors are [`Invalid<Name>`](crate::Invalid), whose kind is a [`CountError`].
+/// Its errors are [`Invalid<Name>`](crate::Invalid), whose kind is a [`CountErrorKind`].
 ///
 /// # Max
 ///
 /// `max = N` caps the count at `N`; without it, the cap is `i64::MAX`:
 ///
 /// ```
-/// use uima_core::CountError;
+/// use uima_core::CountErrorKind;
 ///
 /// uima_core::count!(pub Retries, max = 3);
 ///
 /// let retries = Retries::new(3).unwrap();
 /// let error = retries.try_increment().unwrap_err();
-/// assert_eq!(error.kind(), &CountError::AboveMax { received: 4, max: 3 });
+/// assert_eq!(error.kind(), &CountErrorKind::AboveMax { received: 4, max: 3 });
 /// assert_eq!(error.to_string(), "Retries can't exceed 3, received: 4");
 /// ```
 ///
@@ -76,14 +78,15 @@ macro_rules! count {
         $vis struct $name(::core::primitive::u64);
 
         impl $name {
+            /// A count of zero.
             pub const ZERO: Self = Self(0);
             /// The highest count: the `max` given, else `i64::MAX`.
             pub const MAX: ::core::primitive::u64 = $max;
 
-            /// `count`, or [`AboveMax`]($crate::CountError::AboveMax) above `MAX`.
+            /// `count`, or `AboveMax` above `MAX`.
             pub const fn new(count: ::core::primitive::u64) -> ::core::result::Result<Self, $crate::Invalid<Self>> {
                 if count > Self::MAX {
-                    return ::core::result::Result::Err($crate::Invalid::new($crate::CountError::AboveMax {
+                    return ::core::result::Result::Err($crate::Invalid::new($crate::CountErrorKind::AboveMax {
                         received: count as ::core::primitive::u128,
                         max: Self::MAX,
                     }));
@@ -91,32 +94,34 @@ macro_rules! count {
                 ::core::result::Result::Ok(Self(count))
             }
 
+            /// The count as a `u64`.
             pub const fn get(self) -> ::core::primitive::u64 {
                 self.0
             }
 
+            /// Whether the count is zero.
             pub const fn is_zero(self) -> ::core::primitive::bool {
                 self.0 == 0
             }
 
-            /// One more, or [`AboveMax`]($crate::CountError::AboveMax) at `MAX`.
+            /// One more, or `AboveMax` at `MAX`.
             pub const fn try_increment(self) -> ::core::result::Result<Self, $crate::Invalid<Self>> {
                 self.try_add(1)
             }
 
-            /// One fewer, or [`Negative`]($crate::CountError::Negative) at zero.
+            /// One fewer, or `Negative` at zero.
             pub const fn try_decrement(self) -> ::core::result::Result<Self, $crate::Invalid<Self>> {
                 self.try_sub(1)
             }
 
-            /// `n` more, or [`AboveMax`]($crate::CountError::AboveMax) past `MAX`.
+            /// `n` more, or `AboveMax` past `MAX`.
             pub const fn try_add(
                 self,
                 n: ::core::primitive::u64,
             ) -> ::core::result::Result<Self, $crate::Invalid<Self>> {
                 let sum = self.0 as ::core::primitive::u128 + n as ::core::primitive::u128;
                 if sum > Self::MAX as ::core::primitive::u128 {
-                    return ::core::result::Result::Err($crate::Invalid::new($crate::CountError::AboveMax {
+                    return ::core::result::Result::Err($crate::Invalid::new($crate::CountErrorKind::AboveMax {
                         received: sum,
                         max: Self::MAX,
                     }));
@@ -124,13 +129,13 @@ macro_rules! count {
                 ::core::result::Result::Ok(Self(sum as ::core::primitive::u64))
             }
 
-            /// `n` fewer, or [`Negative`]($crate::CountError::Negative) below zero.
+            /// `n` fewer, or `Negative` below zero.
             pub const fn try_sub(
                 self,
                 n: ::core::primitive::u64,
             ) -> ::core::result::Result<Self, $crate::Invalid<Self>> {
                 if n > self.0 {
-                    return ::core::result::Result::Err($crate::Invalid::new($crate::CountError::Negative {
+                    return ::core::result::Result::Err($crate::Invalid::new($crate::CountErrorKind::Negative {
                         received: self.0 as ::core::primitive::i128 - n as ::core::primitive::i128,
                     }));
                 }
@@ -140,18 +145,18 @@ macro_rules! count {
             /// One more, stopping at `MAX`.
             #[must_use]
             pub const fn increment(self) -> Self {
-                self.add(1)
+                self.saturating_add(1)
             }
 
             /// One fewer, stopping at zero.
             #[must_use]
             pub const fn decrement(self) -> Self {
-                self.sub(1)
+                self.saturating_sub(1)
             }
 
             /// `n` more, stopping at `MAX`.
             #[must_use]
-            pub const fn add(self, n: ::core::primitive::u64) -> Self {
+            pub const fn saturating_add(self, n: ::core::primitive::u64) -> Self {
                 if n >= Self::MAX - self.0 {
                     return Self(Self::MAX);
                 }
@@ -160,7 +165,7 @@ macro_rules! count {
 
             /// `n` fewer, stopping at zero.
             #[must_use]
-            pub const fn sub(self, n: ::core::primitive::u64) -> Self {
+            pub const fn saturating_sub(self, n: ::core::primitive::u64) -> Self {
                 Self(self.0.saturating_sub(n))
             }
 
@@ -182,7 +187,7 @@ macro_rules! count {
                 match <::core::primitive::u64 as ::core::convert::TryFrom<_>>::try_from(count) {
                     ::core::result::Result::Ok(count) => Self::new(count),
                     ::core::result::Result::Err(_) => {
-                        ::core::result::Result::Err($crate::Invalid::new($crate::CountError::Negative {
+                        ::core::result::Result::Err($crate::Invalid::new($crate::CountErrorKind::Negative {
                             received: count as ::core::primitive::i128,
                         }))
                     }
@@ -205,21 +210,21 @@ macro_rules! count {
 
         impl $crate::Newtype for $name {
             const NAME: &'static ::core::primitive::str = ::core::stringify!($name);
-            type Kind = $crate::CountError;
+            type Kind = $crate::CountErrorKind;
         }
     };
 }
 
 /// What is wrong with a count.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CountError {
+pub enum CountErrorKind {
     /// Below zero: read back from a negative number, or more taken away than there is.
     Negative { received: i128 },
     /// Above the max: given a larger number, or more added than fits.
     AboveMax { received: u128, max: u64 },
 }
 
-impl fmt::Display for CountError {
+impl fmt::Display for CountErrorKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Negative { received } => write!(f, "can't be negative, received: {received}"),
@@ -248,10 +253,10 @@ mod tests {
         TestCapped::new(n).unwrap()
     }
 
-    fn rejected<T, N>(result: Result<T, Invalid<N>>) -> CountError
+    fn rejected<T, N>(result: Result<T, Invalid<N>>) -> CountErrorKind
     where
         T: fmt::Debug,
-        N: Newtype<Kind = CountError>,
+        N: Newtype<Kind = CountErrorKind>,
     {
         result.unwrap_err().into_kind()
     }
@@ -278,7 +283,7 @@ mod tests {
         check!(TestCount::new(TestCount::MAX).is_ok());
         check!(
             rejected(TestCount::new(TestCount::MAX + 1))
-                == CountError::AboveMax {
+                == CountErrorKind::AboveMax {
                     received: u128::from(TestCount::MAX) + 1,
                     max: TestCount::MAX,
                 }
@@ -286,7 +291,7 @@ mod tests {
         check!(TestCapped::new(3) == Ok(capped(3)));
         check!(
             rejected(TestCapped::new(4))
-                == CountError::AboveMax {
+                == CountErrorKind::AboveMax {
                     received: 4,
                     max: 3
                 }
@@ -318,7 +323,7 @@ mod tests {
         check!(count(4).try_increment() == Ok(count(5)));
         check!(
             rejected(count(TestCount::MAX).try_increment())
-                == CountError::AboveMax {
+                == CountErrorKind::AboveMax {
                     received: u128::from(TestCount::MAX) + 1,
                     max: TestCount::MAX,
                 }
@@ -326,7 +331,7 @@ mod tests {
         check!(capped(2).try_increment() == Ok(capped(3)));
         check!(
             rejected(capped(3).try_increment())
-                == CountError::AboveMax {
+                == CountErrorKind::AboveMax {
                     received: 4,
                     max: 3
                 }
@@ -337,49 +342,53 @@ mod tests {
     fn try_decrement_refuses_to_go_below_zero() {
         check!(count(4).try_decrement() == Ok(count(3)));
         check!(count(1).try_decrement() == Ok(TestCount::ZERO));
-        check!(rejected(TestCount::ZERO.try_decrement()) == CountError::Negative { received: -1 });
-        check!(rejected(TestCapped::ZERO.try_decrement()) == CountError::Negative { received: -1 });
+        check!(
+            rejected(TestCount::ZERO.try_decrement()) == CountErrorKind::Negative { received: -1 }
+        );
+        check!(
+            rejected(TestCapped::ZERO.try_decrement()) == CountErrorKind::Negative { received: -1 }
+        );
     }
 
     #[test]
     fn adds_and_subtracts() {
-        check!(count(4).add(3) == count(7));
-        check!(count(4).sub(3) == count(1));
+        check!(count(4).saturating_add(3) == count(7));
+        check!(count(4).saturating_sub(3) == count(1));
         check!(count(4).try_add(3) == Ok(count(7)));
         check!(count(4).try_sub(4) == Ok(TestCount::ZERO));
-        check!(capped(1).add(2) == capped(3));
+        check!(capped(1).saturating_add(2) == capped(3));
         check!(capped(1).try_add(2) == Ok(capped(3)));
         check!(capped(3).try_sub(2) == Ok(capped(1)));
     }
 
     #[test]
     fn add_and_sub_stop_at_the_ends() {
-        check!(capped(1).add(5) == capped(3));
-        check!(count(TestCount::MAX).add(u64::MAX) == count(TestCount::MAX));
-        check!(count(4).sub(5) == TestCount::ZERO);
-        check!(count(4).sub(u64::MAX) == TestCount::ZERO);
+        check!(capped(1).saturating_add(5) == capped(3));
+        check!(count(TestCount::MAX).saturating_add(u64::MAX) == count(TestCount::MAX));
+        check!(count(4).saturating_sub(5) == TestCount::ZERO);
+        check!(count(4).saturating_sub(u64::MAX) == TestCount::ZERO);
     }
 
     #[test]
     fn try_add_and_try_sub_refuse_to_pass_the_ends() {
         check!(
             rejected(capped(1).try_add(5))
-                == CountError::AboveMax {
+                == CountErrorKind::AboveMax {
                     received: 6,
                     max: 3
                 }
         );
         check!(
             rejected(count(TestCount::MAX).try_add(u64::MAX))
-                == CountError::AboveMax {
+                == CountErrorKind::AboveMax {
                     received: u128::from(TestCount::MAX) + u128::from(u64::MAX),
                     max: TestCount::MAX,
                 }
         );
-        check!(rejected(count(4).try_sub(5)) == CountError::Negative { received: -1 });
+        check!(rejected(count(4).try_sub(5)) == CountErrorKind::Negative { received: -1 });
         check!(
             rejected(TestCount::ZERO.try_sub(u64::MAX))
-                == CountError::Negative {
+                == CountErrorKind::Negative {
                     received: -i128::from(u64::MAX)
                 }
         );
@@ -397,10 +406,10 @@ mod tests {
     fn reads_a_non_negative_i64() {
         check!(TestCount::try_from(0_i64) == Ok(TestCount::ZERO));
         check!(TestCount::try_from(i64::MAX) == Ok(count(i64::MAX as u64)));
-        check!(rejected(TestCount::try_from(-1_i64)) == CountError::Negative { received: -1 });
+        check!(rejected(TestCount::try_from(-1_i64)) == CountErrorKind::Negative { received: -1 });
         check!(
             rejected(TestCapped::try_from(4_i64))
-                == CountError::AboveMax {
+                == CountErrorKind::AboveMax {
                     received: 4,
                     max: 3
                 }
@@ -431,7 +440,7 @@ mod tests {
 mod props {
     use proptest::prelude::*;
 
-    use super::CountError;
+    use super::CountErrorKind;
 
     crate::count!(TestCount);
     crate::count!(TestCapped, max = 3);
@@ -476,7 +485,7 @@ mod props {
                             }
                             Err(error) => prop_assert_eq!(
                                 error.into_kind(),
-                                CountError::AboveMax { received: n.into(), max: $count::MAX }
+                                CountErrorKind::AboveMax { received: n.into(), max: $count::MAX }
                             ),
                         }
                     }
@@ -487,11 +496,11 @@ mod props {
                             Ok(count) => prop_assert_eq!(i64::from(count), n),
                             Err(error) if n < 0 => prop_assert_eq!(
                                 error.into_kind(),
-                                CountError::Negative { received: n.into() }
+                                CountErrorKind::Negative { received: n.into() }
                             ),
                             Err(error) => prop_assert_eq!(
                                 error.into_kind(),
-                                CountError::AboveMax { received: n as u128, max: $count::MAX }
+                                CountErrorKind::AboveMax { received: n as u128, max: $count::MAX }
                             ),
                         }
                     }
@@ -506,7 +515,7 @@ mod props {
                                 prop_assert_eq!(n, $count::MAX);
                                 prop_assert_eq!(
                                     error.into_kind(),
-                                    CountError::AboveMax {
+                                    CountErrorKind::AboveMax {
                                         received: u128::from($count::MAX) + 1,
                                         max: $count::MAX,
                                     }
@@ -523,7 +532,7 @@ mod props {
                             Ok(previous) => prop_assert_eq!(previous.get(), n - 1),
                             Err(error) => {
                                 prop_assert_eq!(n, 0);
-                                prop_assert_eq!(error.into_kind(), CountError::Negative { received: -1 });
+                                prop_assert_eq!(error.into_kind(), CountErrorKind::Negative { received: -1 });
                             }
                         }
                     }
@@ -537,13 +546,13 @@ mod props {
                         let sum = u128::from(n) + u128::from(by);
                         let difference = i128::from(n) - i128::from(by);
                         let max = u128::from($count::MAX);
-                        prop_assert_eq!(u128::from(count.add(by).get()), sum.min(max));
-                        prop_assert_eq!(i128::from(count.sub(by).get()), difference.max(0));
+                        prop_assert_eq!(u128::from(count.saturating_add(by).get()), sum.min(max));
+                        prop_assert_eq!(i128::from(count.saturating_sub(by).get()), difference.max(0));
                         match count.try_add(by) {
                             Ok(next) => prop_assert_eq!(u128::from(next.get()), sum),
                             Err(error) => prop_assert_eq!(
                                 error.into_kind(),
-                                CountError::AboveMax { received: sum, max: $count::MAX }
+                                CountErrorKind::AboveMax { received: sum, max: $count::MAX }
                             ),
                         }
                         prop_assert_eq!(count.try_add(by).is_ok(), sum <= max);
@@ -551,7 +560,7 @@ mod props {
                             Ok(previous) => prop_assert_eq!(i128::from(previous.get()), difference),
                             Err(error) => prop_assert_eq!(
                                 error.into_kind(),
-                                CountError::Negative { received: difference }
+                                CountErrorKind::Negative { received: difference }
                             ),
                         }
                         prop_assert_eq!(count.try_sub(by).is_ok(), difference >= 0);
@@ -597,7 +606,7 @@ mod shadowed {
     struct bool;
     struct Option;
     struct Invalid;
-    struct CountError;
+    struct CountErrorKind;
     trait Newtype {}
     type Result<T> = core::result::Result<T, ()>;
     macro_rules! write {

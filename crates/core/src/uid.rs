@@ -1,6 +1,8 @@
 //! [`uid!`](crate::uid), a newtype for an entity's uid.
 
-/// Defines a newtype over [`uuid::Uuid`] for one entity's uid, such as a user's or a post's.
+use std::fmt;
+
+/// Defines a newtype over [`Uuid`](crate::Uuid) for one entity's uid, such as a user's or a post's.
 ///
 /// ```
 /// uima_core::uid!(
@@ -17,10 +19,12 @@
 ///
 /// - `generate`, a new UUID v7, ordered by when it was generated.
 /// - `from_uuid`, usable in a `const`, and `as_uuid`.
-/// - `From<Uuid>`, `From<Name> for Uuid`, and `FromStr`, whose error is a [`uuid::Error`].
+/// - `From<Uuid>` and `From<Name> for Uuid`.
+/// - `FromStr`, `TryFrom<String>`, `TryFrom<&str>`, and `From<Name> for String`.
 /// - `Display` as the hyphenated uuid.
 ///
-/// It has no `Default`: a uid is generated or read back.
+/// It has no `Default`: a uid is generated or read back. Its errors are
+/// [`Invalid<Name>`](crate::Invalid), whose kind is a [`UidErrorKind`].
 ///
 /// # Distinct types
 ///
@@ -60,6 +64,7 @@ macro_rules! uid {
                 Self(uuid)
             }
 
+            /// The uuid itself.
             pub const fn as_uuid(self) -> $crate::__private::Uuid {
                 self.0
             }
@@ -83,20 +88,69 @@ macro_rules! uid {
             }
         }
 
-        impl ::core::str::FromStr for $name {
-            type Err = $crate::__private::uuid::Error;
+        impl ::core::convert::TryFrom<&::core::primitive::str> for $name {
+            type Error = $crate::Invalid<Self>;
 
-            fn from_str(s: &str) -> ::core::result::Result<Self, Self::Err> {
-                ::core::result::Result::Ok(Self(s.parse()?))
+            fn try_from(text: &::core::primitive::str) -> ::core::result::Result<Self, Self::Error> {
+                <Self as ::core::str::FromStr>::from_str(text)
             }
         }
+
+        impl ::core::convert::TryFrom<::std::string::String> for $name {
+            type Error = $crate::Invalid<Self>;
+
+            fn try_from(text: ::std::string::String) -> ::core::result::Result<Self, Self::Error> {
+                <Self as ::core::str::FromStr>::from_str(&text)
+            }
+        }
+
+        impl ::core::convert::From<$name> for ::std::string::String {
+            fn from(uid: $name) -> Self {
+                ::std::string::ToString::to_string(&uid.0)
+            }
+        }
+
+        impl ::core::str::FromStr for $name {
+            type Err = $crate::Invalid<Self>;
+
+            fn from_str(text: &::core::primitive::str) -> ::core::result::Result<Self, Self::Err> {
+                match <$crate::__private::Uuid as ::core::str::FromStr>::from_str(text) {
+                    ::core::result::Result::Ok(uuid) => ::core::result::Result::Ok(Self(uuid)),
+                    ::core::result::Result::Err(_) => ::core::result::Result::Err(
+                        $crate::Invalid::new($crate::UidErrorKind::NotAUuid),
+                    ),
+                }
+            }
+        }
+
+        impl $crate::Newtype for $name {
+            const NAME: &'static ::core::primitive::str = ::core::stringify!($name);
+            type Kind = $crate::UidErrorKind;
+        }
     };
+}
+
+/// What is wrong with a uid.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UidErrorKind {
+    /// The text isn't a uuid.
+    NotAUuid,
+}
+
+impl fmt::Display for UidErrorKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::NotAUuid => f.write_str("isn't a valid uuid"),
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use assert2::check;
     use uuid::Uuid;
+
+    use super::*;
 
     crate::uid!(TestUid);
 
@@ -143,16 +197,41 @@ mod tests {
     }
 
     #[test]
+    fn converts_from_and_into_strings() {
+        let text = "00000000-0000-0000-0000-000000000007";
+        let uid = TestUid::from(Uuid::from_u128(7));
+        check!(TestUid::try_from(text).ok() == Some(uid));
+        check!(TestUid::try_from(String::from(text)).ok() == Some(uid));
+        check!(String::from(uid) == text);
+    }
+
+    #[test]
     fn rejects_text_that_is_not_a_uuid() {
-        check!("not a uuid".parse::<TestUid>().is_err());
+        let error = "not a uuid".parse::<TestUid>().unwrap_err();
+        check!(error.into_kind() == UidErrorKind::NotAUuid);
+        check!(
+            "not a uuid".parse::<TestUid>().unwrap_err().to_string()
+                == "TestUid isn't a valid uuid"
+        );
     }
 }
 
 /// Compiles only if the macro uses none of the caller's names.
 #[cfg(test)]
-#[allow(dead_code, unused_macros, reason = "only here to shadow names")]
+#[allow(
+    dead_code,
+    unused_macros,
+    non_camel_case_types,
+    reason = "only here to shadow names"
+)]
 mod shadowed {
+    struct String;
+    struct str;
+    trait ToString {}
     struct Uuid;
+    struct Invalid;
+    struct UidErrorKind;
+    trait Newtype {}
     type Result<T> = core::result::Result<T, ()>;
     mod uuid {}
     macro_rules! write {
