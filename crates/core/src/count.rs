@@ -594,7 +594,7 @@ mod props {
 
 /// Compiles only if the macro uses none of the caller's names.
 #[cfg(test)]
-#[allow(
+#[expect(
     dead_code,
     unused_macros,
     non_camel_case_types,

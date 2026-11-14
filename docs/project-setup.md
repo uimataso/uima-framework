@@ -40,6 +40,8 @@ Clippy's default lints, plus a few more that the project's `Cargo.toml` turns on
 - **`justfile`**: `lint` runs `cargo clippy --workspace --all-targets --all-features -- -D warnings`,
   as part of `check`. `--all-features` lints the code behind the `testing` feature too. The flake's
   check runs the same command.
+- **Silencing a lint**: prefer `#[expect(lint, reason = "...")]` to `#[allow(...)]`. Once the
+  lint no longer fires, `expect` warns, so the attribute doesn't outlive its reason.
 
 [treefmt]: https://github.com/numtide/treefmt
 [treefmt-nix]: https://github.com/numtide/treefmt-nix

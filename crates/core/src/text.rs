@@ -440,7 +440,7 @@ pub fn check<R>(
 }
 
 #[cfg(test)]
-#[allow(
+#[expect(
     dead_code,
     reason = "a type needn't use every method the macro defines"
 )]
@@ -653,7 +653,7 @@ mod tests {
 }
 
 #[cfg(test)]
-#[allow(
+#[expect(
     dead_code,
     reason = "a type needn't use every method the macro defines"
 )]
@@ -721,7 +721,7 @@ mod props {
 
 /// Compiles only if the macros use none of the caller's names.
 #[cfg(test)]
-#[allow(
+#[expect(
     dead_code,
     unused_macros,
     non_camel_case_types,
