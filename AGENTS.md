@@ -7,6 +7,8 @@ sowah, nova-el, techo and genkan.
 
 - How to write the code: `docs/style-guide/`.
 - How crates are laid out, named and split into light and heavy: `docs/crates.md`.
+- What a project's repo has around its code and how to set it up:
+  `docs/project-setup.md`.
 - The plan and its decisions: `docs/plan.md`, a local file that isn't committed; read it, when
   present, before adding a crate.
 
