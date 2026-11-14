@@ -5,14 +5,14 @@
 A module's tests live in its `tests` submodule. Start inline and move to a file only as the suite
 grows:
 
-| Layout                                | Use when                                                         | Example for module `foo`           |
-| ------------------------------------- | ---------------------------------------------------------------- | ---------------------------------- |
-| Inline `mod tests { ... }`            | Default: the suite is small enough to sit at the end of the file | `mod tests` in `src/foo.rs`        |
-| `tests.rs`                            | One module's suite is too big to stay inline                     | `src/foo/tests.rs`                 |
-| `tests/` (`mod.rs` plus `<topic>.rs`) | One module's tests need splitting into several files by topic    | `src/foo/tests/{mod,<topic>}.rs`   |
-| `testing`                             | Not tests: shared test helpers and doubles                       | `mod testing` in `src/foo.rs`      |
-| `contract`                            | Not tests: a port's test suite that every adapter runs           | `pub mod contract` in `src/foo.rs` |
-| `tests/` at the crate root            | Don't use: write unit tests under `src/` instead                 | n/a                                |
+| Layout                                | Use when                                                           | Example for module `foo`           |
+| ------------------------------------- | ------------------------------------------------------------------ | ---------------------------------- |
+| Inline `mod tests { ... }`            | Default: the suite is small enough to sit at the end of the file   | `mod tests` in `src/foo.rs`        |
+| `tests.rs`                            | One module's suite is too big to stay inline                       | `src/foo/tests.rs`                 |
+| `tests/` (`mod.rs` plus `<topic>.rs`) | One module's tests need splitting into several files by topic      | `src/foo/tests/{mod,<topic>}.rs`   |
+| `testing`                             | Not tests: shared test helpers and doubles                         | `mod testing` in `src/foo.rs`      |
+| `contract`                            | Not tests: a port's test suite that every adapter runs             | `pub mod contract` in `src/foo.rs` |
+| `tests/` at the crate root            | Only for code a crate can't test from inside, such as a proc macro | n/a                                |
 
 - `tests.rs` holds the module body directly; don't wrap it in another `mod tests { ... }`. When it
   grows into `tests/`, move it to `tests/mod.rs`; never keep `tests.rs` and `tests/` side by side.
@@ -24,8 +24,6 @@ grows:
 - `testing` that other crates use is behind the `testing` feature; `testing` used only by its own
   crate is behind `cfg(test)`.
 - `testing` and `contract` grow the same way as `tests`: inline first, then a file.
-- Proc-macro crates are the one exception to crate-root `tests/`, since a proc macro can't be used
-  in the crate that defines it.
 
 Assertions use `assert2::check!` and `assert2::assert!`, never `std::assert*!`, for their output.
 Group related cases into one test function named for the behavior instead of one function per

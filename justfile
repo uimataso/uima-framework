@@ -5,9 +5,18 @@ default:
     @just --list
 
 # run the tests; nextest skips doctests, so they run separately
-test:
+test: test-nix
     cargo nextest run --workspace --no-tests=pass
     cargo test --doc --workspace
+
+# the flake checks named `test-*`, such as the flake functions' tests
+test-nix:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    checks=".#checks.$(nix eval --impure --raw --expr builtins.currentSystem)"
+    nix eval --raw "$checks" --apply 'cs: toString (builtins.filter
+      (n: builtins.match "test-.*" n != null) (builtins.attrNames cs))' \
+      | tr ' ' '\n' | sed "s|^|$checks.|" | xargs --no-run-if-empty nix build --no-link
 
 # format every file (rust, toml, markdown, nix, yaml; see treefmt.nix)
 fmt:

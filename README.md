@@ -10,9 +10,5 @@ all build with.
 
 ## Development
 
-```sh
-nix develop        # or: direnv allow
-just check         # formatting + lints
-just test          # every test
-just ci            # the whole gate; CI runs this
-```
+Enter the dev shell with `nix develop` (or `direnv allow`), then run the
+[recipes](docs/project-setup.md#recipes).

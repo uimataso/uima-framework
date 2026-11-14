@@ -16,8 +16,8 @@ Every project's `justfile` has these recipes, and adds its own (such as `run`) b
 | `test`      | Every test the project has, Rust or not.                                                      |
 | `ci`        | The whole gate: `nix flake check`, then `test` with the CI test profile. CI runs this recipe. |
 
-`nix flake check` runs the same checks as `check`, and for a service also builds it; the tests stay
-out of it (see [Tests](#tests)).
+`nix flake check` runs the same checks as `check`, and for a service also builds it; the Rust tests
+stay out of it (see [Tests](#tests)).
 Before a commit, run `just check test`.
 
 ## Flake
@@ -30,9 +30,9 @@ them with `//`. This repo's [`flake.nix`](../flake.nix) is the library example.
 
 ## Toolchain
 
-- **`rust-toolchain.toml`** at the repo root is the only place the Rust version is written. Copy
-  this repo's [`rust-toolchain.toml`](../rust-toolchain.toml), components included. It names an
-  exact release, not `stable`, so a new release's lints can't break a build that passed.
+- **`rust-toolchain.toml`** at the repo root is the only place the toolchain release is written.
+  Copy this repo's [`rust-toolchain.toml`](../rust-toolchain.toml), components included. It names
+  an exact release, not `stable`, so a new release's lints can't break a build that passed.
 - **The flake functions** read it with [rust-overlay] for the build, the checks and the dev shell,
   so CI gets the same release. A release newer than the framework's locked rust-overlay needs
   `nix flake update rust-overlay` in this repo first.
@@ -151,8 +151,10 @@ rustc's and Clippy's default lints, plus a few more that the project's `Cargo.to
 
 - **Runner**: the tests run with [nextest], and the doctests with `cargo test --doc`, since nextest
   can't run doctests yet ([nextest#16]). Once it can, nextest runs both.
-- **Outside the sandbox**: the tests run in the dev shell, not in `nix flake check`, so they can
-  reach Docker and the project's other tools.
+- **Outside the sandbox**: the Rust tests run in the dev shell, not in `nix flake check`, so they
+  can reach Docker and the project's other tools.
+- **Nix tests**: a flake check named `test-*` is a test of the nix code, and `just test` builds it
+  with the rest.
 - **CI profile**: copy this repo's [`.config/nextest.toml`](../.config/nextest.toml). CI runs
   nextest with its `ci` profile, which reports every failure and kills a hung test.
 - **External services**: a test that needs a service, such as Postgres, starts it with

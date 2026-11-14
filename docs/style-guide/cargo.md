@@ -15,13 +15,6 @@ Dependencies go in hand-picked blocks separated by blank lines. `just fmt` sorts
 but keeps the blocks and their order, so choosing the blocks is up to you:
 
 ```toml
-[package]
-name = "example"
-version.workspace = true
-rust-version.workspace = true
-edition.workspace = true
-authors.workspace = true
-
 [features]
 testing = ["dep:testcontainers"]
 

@@ -185,14 +185,13 @@ let
           contents ? _: [ ],
           uid ? 65532,
         }:
-        pkgs.dockerTools.streamLayeredImage {
+        (pkgs.dockerTools.streamLayeredImage {
           name = binary;
           tag = buildSha;
           contents = [ pkgs.cacert ] ++ contents pkgs;
           # A writable /tmp, and a user for the uid, so temp files and $HOME
-          # work. The test fails the build when `binary` isn't one.
+          # work.
           extraCommands = ''
-            test -x ${package}/bin/${binary}
             mkdir -m 1777 tmp
             mkdir -p etc
             echo "app:x:${toString uid}:${toString uid}::/tmp:/sbin/nologin" > etc/passwd
@@ -214,7 +213,15 @@ let
             }
             // lib.optionalAttrs (source != null) { "org.opencontainers.image.source" = source; };
           };
-        };
+        }).overrideAttrs
+          (old: {
+            # An `images` key that isn't a binary fails here, not when the
+            # container starts.
+            buildCommand = ''
+              test -x ${package}/bin/${binary}
+            ''
+            + old.buildCommand;
+          });
 
       imagePackages = lib.mapAttrs' (
         binary: config: lib.nameValuePair "${binary}-image" (imageOf binary config)

@@ -18,6 +18,7 @@ let
         inherit (pkgs.stdenv.hostPlatform) system;
         name = "fixture";
         root = ./tests/fixture;
+        extraSrc = [ ./tests/fixture/asset.txt ];
         mainProgram = "fixture";
         images.fixture = {
           ports = [ 8080 ];
@@ -68,8 +69,19 @@ let
         "tag-image"
       ];
     };
+    testAppPrograms = {
+      expr = lib.mapAttrs (_: app: baseNameOf app.program) service.apps;
+      expected = {
+        publish-image = "publish-image";
+        tag-image = "tag-image";
+      };
+    };
     testNoRegistryNoApps = {
       expr = (serviceWith { registry = null; }).apps;
+      expected = { };
+    };
+    testNoImagesNoApps = {
+      expr = (serviceWith { images = { }; }).apps;
       expected = { };
     };
     testBuildSha = {
@@ -85,8 +97,8 @@ let
       expected = "dev";
     };
     testMainProgram = {
-      expr = lib.getExe service.packages.fixture;
-      expected = "${service.packages.fixture}/bin/fixture";
+      expr = service.packages.fixture.meta.mainProgram or null;
+      expected = "fixture";
     };
     testAppsHaveDescriptions = {
       expr = lib.mapAttrs (_: app: app.meta ? description) service.apps;
@@ -98,7 +110,9 @@ let
   };
 
   # Stand-ins for skopeo and git that log their arguments. The registry is
-  # a file of `<ref> <digest>` lines.
+  # a file of `<ref> <digest>` lines; a ref in $STUB_BROKEN fails as an
+  # unreachable registry would. A missing ref fails with exit 1, the status
+  # a registry most often gives.
   stubSkopeo = pkgs.writeShellScriptBin "skopeo" ''
     [[ $1 == --insecure-policy ]] && shift
     echo "$*" >> "$STUB_LOG"
@@ -106,13 +120,24 @@ let
       copy) cat > /dev/null ;;
       inspect)
         ref=''${*: -1}
-        line=$(grep "^''${ref#docker://} " "$STUB_REGISTRY") || exit 1
+        ref=''${ref#docker://}
+        if [[ $ref == "''${STUB_BROKEN:-}" ]]; then
+          echo "unauthorized: authentication required" >&2
+          exit 1
+        fi
+        if ! line=$(grep "^$ref " "$STUB_REGISTRY"); then
+          echo "manifest unknown: manifest unknown" >&2
+          exit 1
+        fi
         echo "''${line#* }"
         ;;
     esac
   '';
   stubGit = pkgs.writeShellScriptBin "git" ''
-    printf '%s\trefs/heads/main\n' "$STUB_TIP"
+    # Like git, nothing when origin has no main.
+    if [[ -n $STUB_TIP ]]; then
+      printf '%s\trefs/heads/main\n' "$STUB_TIP"
+    fi
   '';
   scriptFor =
     file: buildSha:
@@ -173,8 +198,12 @@ in
         grep -q '^l.* \./bin/hello -> ${pkgs.hello}/' files
         [[ $(tar -xOf $root ./etc/passwd) == 'app:x:65532:65532::/tmp:/sbin/nologin' ]]
 
-        # The app pushes to the registry without its trailing slash.
-        grep -q 'docker://registry.test/owner/fixture:' ${service.apps.publish-image.program}
+        # The apps push this build, to the registry without its trailing
+        # slash.
+        for app in ${service.apps.publish-image.program} ${service.apps.tag-image.program}; do
+          grep -q '^sha=${sha}$' $app
+          grep -q 'docker://registry.test/owner/fixture:' $app
+        done
         touch $out
       '';
 
@@ -217,8 +246,15 @@ in
         expect 0 $publish latest
         ! grep -q ':latest' "$STUB_LOG" || fail "moved latest after main moved on"
 
-        expect 1 $publish a/b
-        no_copy
+        export STUB_TIP=
+        expect 1 $publish latest
+        ! grep -q ':latest' "$STUB_LOG" || fail "moved latest with no main"
+
+        # Not a tag, or the tag of a build or a release.
+        for bad in a/b .x ${sha} 1.2.3; do
+          expect 1 $publish "$bad"
+          no_copy
+        done
         expect 1 $publish_dirty
         no_copy
 
@@ -227,10 +263,10 @@ in
         logged "copy docker://$reg/a:${sha} docker://$reg/a:1.2.3"
         logged "copy docker://$reg/b:${sha} docker://$reg/b:1.2.3"
 
-        expect 1 $tag foo
-        no_copy
-        expect 1 $tag 1.2
-        no_copy
+        for bad in foo 1.2 1.2.3-rc1 x1.2.3 1a2b3; do
+          expect 1 $tag "$bad"
+          no_copy
+        done
         expect 1 $tag_dirty 1.2.3
         no_copy
 
@@ -241,6 +277,10 @@ in
         expect 1 $tag 1.2.3
         no_copy
 
+        # A release that can't be looked up is refused, not overwritten.
+        STUB_BROKEN=$reg/b:1.2.4 expect 1 $tag 1.2.4
+        no_copy
+
         # A missing build is refused before anything is tagged.
         echo "$reg/a:${sha} sha256:a" > "$STUB_REGISTRY"
         expect 1 $tag 1.2.4
@@ -248,4 +288,21 @@ in
 
         touch $out
       '';
+
+  # An `images` key that isn't a binary fails the image build.
+  test-missing-binary =
+    pkgs.testers.testBuildFailure
+      (serviceWith {
+        images.nope = { };
+      }).packages.nope-image;
+
+  # The cargo-sort program sorts: an unsorted Cargo.toml fails the check.
+  test-cargo-sort =
+    pkgs.testers.testBuildFailure
+      (uimaLib.mkRustProject {
+        self.outPath = ./tests/unsorted;
+        inherit (pkgs.stdenv.hostPlatform) system;
+        name = "unsorted";
+        root = ./tests/unsorted;
+      }).checks.formatting;
 }

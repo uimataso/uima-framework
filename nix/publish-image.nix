@@ -24,9 +24,12 @@ writeShellApplication {
     # check here, as the images come from this build.
     skopeo() { command skopeo --insecure-policy "$@"; }
 
+    # The moving tag can't look like a build sha or a release, the tags
+    # this script and tag-image keep on one image.
     moving_tag=''${1:-}
-    if [[ -n $moving_tag ]] && ! [[ $moving_tag =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$ ]]; then
-      echo "publish-image: not a valid tag: $moving_tag" >&2
+    if [[ -n $moving_tag ]] && { ! [[ $moving_tag =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$ ]] ||
+      [[ $moving_tag =~ ^[0-9a-f]{12}$ ]] || [[ $moving_tag =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; }; then
+      echo "publish-image: not a moving tag: $moving_tag" >&2
       exit 1
     fi
     sha=${buildSha}
@@ -45,6 +48,10 @@ writeShellApplication {
     )}
     if [[ -n $moving_tag ]]; then
       tip=$(git ls-remote origin refs/heads/main | cut -c1-12)
+      if [[ -z $tip ]]; then
+        echo "publish-image: origin has no main; $moving_tag stays" >&2
+        exit 1
+      fi
       if [[ $tip != "$sha" ]]; then
         echo "publish-image: main has moved on to $tip; $moving_tag stays" >&2
         exit 0

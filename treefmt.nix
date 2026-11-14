@@ -3,6 +3,8 @@
 { ... }:
 {
   projectRootFile = "flake.nix";
+  # A fixture that must stay unsorted; see nix/tests.nix.
+  settings.global.excludes = [ "nix/tests/unsorted/*" ];
 
   programs.cargo-sort.enable = true;
 
