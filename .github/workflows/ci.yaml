@@ -5,6 +5,11 @@ on:
   push:
   workflow_dispatch:
 
+# cache-nix-action purges this workflow's older caches.
+permissions:
+  contents: read
+  actions: write
+
 jobs:
   ci:
     runs-on: ubuntu-latest
@@ -15,7 +20,9 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: cachix/install-nix-action@3dc140bfc76c49fbd4dd958429132e3746bcb086 # v31.11.5
+      # Single-user nix, so the store belongs to the runner's user and
+      # cache-nix-action can restore it.
+      - uses: nixbuild/nix-quick-install-action@9f63be77f412a248c9d9a65a4c82cf066cdf8f0c # v35
 
       # Saves /nix/store between runs (toolchain, crates, earlier builds).
       # The key changes with anything that changes what gets built; a miss
