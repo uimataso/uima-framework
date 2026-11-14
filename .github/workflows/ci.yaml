@@ -25,11 +25,12 @@ jobs:
       - uses: nixbuild/nix-quick-install-action@9f63be77f412a248c9d9a65a4c82cf066cdf8f0c # v35
 
       # Saves /nix/store between runs (toolchain, crates, earlier builds).
-      # The key changes with anything that changes what gets built; a miss
-      # restores the newest older cache and saves a new one at the end.
+      # The key changes with anything that changes what gets built or how
+      # it's cached; a miss restores the newest older cache and saves a new
+      # one at the end.
       - uses: nix-community/cache-nix-action@7df957e333c1e5da7721f60227dbba6d06080569 # v7.0.2
         with:
-          primary-key: nix-${{ runner.os }}-${{ hashFiles('flake.lock', '**/*.nix', 'rust-toolchain.toml', 'Cargo.lock') }}
+          primary-key: nix-${{ runner.os }}-${{ hashFiles('flake.lock', '**/*.nix', 'rust-toolchain.toml', 'Cargo.lock', '.github/workflows/ci.yaml') }}
           restore-prefixes-first-match: nix-${{ runner.os }}-
           # Keep the saved store small: GC down to this before saving.
           gc-max-store-size-linux: 2G
@@ -42,3 +43,14 @@ jobs:
 
       - name: CI
         run: nix develop -c just ci
+
+      # cache-nix-action collects garbage before saving, and keeps only what
+      # a GC root holds. The dev shell holds the toolchain, and each check
+      # holds the dependencies it built.
+      - name: Keep the build in the cache
+        run: |
+          system=$(nix eval --impure --raw --expr builtins.currentSystem)
+          nix develop --profile .gcroots/dev-shell -c true
+          nix eval --json ".#checks.$system" --apply builtins.attrNames \
+            | jq -r --arg system "$system" '.[] | ".#checks.\($system).\(.)"' \
+            | xargs nix build --out-link .gcroots/check
