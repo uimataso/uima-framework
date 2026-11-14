@@ -10,14 +10,7 @@ let
   cfg = config.programs.cargo-sort;
 in
 {
-  options.programs.cargo-sort = {
-    enable = lib.mkEnableOption "cargo-sort";
-    priority = lib.mkOption {
-      type = lib.types.int;
-      default = 0;
-      description = "Runs before taplo, which formats the same files.";
-    };
-  };
+  options.programs.cargo-sort.enable = lib.mkEnableOption "cargo-sort";
 
   config = lib.mkIf cfg.enable {
     # cargo-sort takes crate directories, not files, so the wrapper passes
@@ -34,7 +27,10 @@ in
         '';
       };
       includes = [ "Cargo.toml" ];
-      inherit (cfg) priority;
+      priority = 0;
     };
+
+    # taplo formats the same files, after cargo-sort has sorted them.
+    programs.taplo.priority = lib.mkDefault 1;
   };
 }

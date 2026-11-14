@@ -16,16 +16,17 @@ Every project's `justfile` has these recipes, and adds its own (such as `run`) b
 | `test`      | Every test the project has, Rust or not.                                                      |
 | `ci`        | The whole gate: `nix flake check`, then `test` with the CI test profile. CI runs this recipe. |
 
-`nix flake check` runs the same checks as `check`; the tests stay out of it (see [Tests](#tests)).
+`nix flake check` runs the same checks as `check`, and for a service also builds it; the tests stay
+out of it (see [Tests](#tests)).
 Before a commit, run `just check test`.
 
 ## Flake
 
 A project's `flake.nix` calls the framework's flake functions, in [`nix/lib.nix`](../nix/lib.nix),
 which list their parameters: `mkRustService` for a service, `mkRustProject` for a library. They
-return one system's outputs; the project places them with `eachSystem`, so its own `flake.nix`
-shows what it outputs, and an extra check or app goes beside them with `//`. This repo's
-[`flake.nix`](../flake.nix) is the library example.
+return one system's parts, such as `checks` and `devShell`; the project places them with
+`eachSystem`, so its own `flake.nix` shows what it outputs, and an extra check or app goes beside
+them with `//`. This repo's [`flake.nix`](../flake.nix) is the library example.
 
 ## Toolchain
 
@@ -42,13 +43,12 @@ shows what it outputs, and an extra check or app goes beside them with `//`. Thi
 
 ## Build
 
-`mkRustService` builds with [crane].
+The flake functions build with [crane].
 
 - **Dependencies** build once in their own derivation and are reused by the build and the checks,
   so a change to the project's code doesn't rebuild them. Git dependencies need no hash.
-- **Sources**: `cleanCargoSource`, which keeps the Rust sources and Cargo files. Add any other file
-  the build reads, such as `migrations/` for `sqlx::migrate!` or an asset under `include_str!`,
-  through `extraSrc`.
+- **Sources**: the Rust sources and Cargo files. Add any other file the build or a test reads, such
+  as `migrations/` for `sqlx::migrate!` or a fixture under `include_str!`, through `extraSrc`.
 - **Packages** are named, with no `packages.default`: `packages.<project>` holds every binary of
   the workspace, built once. A single-binary project sets `meta.mainProgram`, so
   `nix run .#<project>` runs it.
@@ -73,9 +73,7 @@ shows what it outputs, and an extra check or app goes beside them with `//`. Thi
 - **Config**: `ExposedPorts` and `Env` come from the project, with `RUST_LOG=info` by default.
 - **Labels**: `org.opencontainers.image.revision` (the build sha) and
   `org.opencontainers.image.source` (the repo URL).
-- **Tags**: the build sha on every image. A release, tagged `v1.2.3` in git, also gets `1.2.3`,
-  without the `v`. A moving tag such as `latest` or `dev` is the project's to choose, for its
-  deploy.
+- **Tags**: see [CI](#ci).
 - **Architecture**: the one the CI runner has.
 
 ## CI
@@ -90,8 +88,7 @@ Each project's workflow runs on its own CI host, in three stages:
    without rebuilding it, so production runs the image dev ran.
 
 - **Publishing** goes through the flake's apps, `publish-image` and `tag-image`, so CI and a local
-  run push the same way. The CI
-  host only logs in to the registry.
+  run push the same way. The CI host only logs in to the registry.
 - **Actions** (GitHub) are pinned to a commit sha, with the version in a comment.
 - **Triggers**: `push` and `workflow_dispatch`. Every job has a timeout.
 - **Nix cache**: the store is kept between runs, by `cache-nix-action` on GitHub and by a volume on
@@ -106,7 +103,7 @@ Each registry's own cleanup rules keep:
 
 - every release tag (`1.2.3`);
 - the images the moving tags point at;
-- the 10 most recent images that have only a build sha tag.
+- the most recent few images that have only a build sha tag.
 
 ## Dev shell
 
@@ -123,7 +120,7 @@ Every file in the repo is formatted, not only Rust, with [treefmt] through [tree
   with whichever rustfmt is on `PATH`. It runs with its defaults: no `rustfmt.toml`.
 - **The flake functions** turn `treefmt.nix` into the `formatter` (`nix fmt`), a `formatting`
   check, and a `treefmt` in the dev shell. They also add a `cargo-sort` program, which
-  treefmt-nix doesn't have.
+  treefmt-nix doesn't have, for `treefmt.nix` to enable.
 
 When adding formatting to an existing repo, format everything in a commit of its own and list it
 in `.git-blame-ignore-revs`. GitHub and Forgejo read the file on their own; locally, run

@@ -44,11 +44,18 @@
           inherit self system;
           name = "uima-framework";
           root = ./.;
-          devPackages = [ nixpkgs.legacyPackages.${system}.cargo-mutants ];
+          devPackages = pkgs: [ pkgs.cargo-mutants ];
         };
+        pkgs = nixpkgs.legacyPackages.${system};
       in
       {
-        inherit (project) formatter checks;
+        inherit (project) formatter;
+        checks =
+          project.checks
+          # The tests build images, which are Linux-only.
+          // nixpkgs.lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux (
+            import ./nix/tests.nix { inherit pkgs uimaLib; }
+          );
         devShells.default = project.devShell;
       }
     );

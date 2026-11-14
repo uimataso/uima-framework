@@ -18,12 +18,17 @@ writeShellApplication {
     gzip
     git
   ];
+  meta.description = "Publish the images under the build sha and a moving tag";
   text = ''
     # skopeo checks images against a signature policy; there is none to
     # check here, as the images come from this build.
     skopeo() { command skopeo --insecure-policy "$@"; }
 
     moving_tag=''${1:-}
+    if [[ -n $moving_tag ]] && ! [[ $moving_tag =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$ ]]; then
+      echo "publish-image: not a valid tag: $moving_tag" >&2
+      exit 1
+    fi
     sha=${buildSha}
     if ! [[ $sha =~ ^[0-9a-f]{12}$ ]]; then
       echo "publish-image: not a clean commit build: $sha" >&2
@@ -32,6 +37,8 @@ writeShellApplication {
 
     ${lib.concatStrings (
       lib.mapAttrsToList (binary: image: ''
+        # skopeo reads a compressed archive from a pipe; an uncompressed one
+        # needs a file it can seek in.
         ${image} | gzip --fast |
           skopeo copy docker-archive:/dev/stdin "docker://${registry}/${binary}:$sha"
       '') images
@@ -43,7 +50,8 @@ writeShellApplication {
         exit 0
       fi
       ${lib.concatMapStrings (binary: ''
-        skopeo copy "docker://${registry}/${binary}:$sha" "docker://${registry}/${binary}:$moving_tag"
+        skopeo copy "docker://${registry}/${binary}:$sha" \
+          "docker://${registry}/${binary}:$moving_tag"
       '') (lib.attrNames images)}
     fi
   '';

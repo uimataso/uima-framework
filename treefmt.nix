@@ -1,9 +1,5 @@
-# Every formatter for the repo, run by `nix fmt` / `just fmt` and checked
-# by `nix flake check`. rustfmt is set to the toolchain rust-toolchain.toml
-# pins, and cargo-sort is defined, by the framework's nix/lib.nix.
-#
-# Programs are in alphabetical order. Only cargo-sort and taplo match the
-# same files (Cargo.toml); cargo-sort runs first.
+# Every formatter for the repo; see docs/project-setup.md#formatting.
+# Programs are in alphabetical order.
 { ... }:
 {
   projectRootFile = "flake.nix";
@@ -23,10 +19,7 @@
     edition = "2024";
   };
 
-  programs.taplo = {
-    enable = true;
-    priority = 1;
-  };
+  programs.taplo.enable = true;
 
   programs.yamlfmt = {
     enable = true;

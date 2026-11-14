@@ -23,30 +23,22 @@ let
     "x86_64-linux"
     "aarch64-linux"
     "aarch64-darwin"
-    "x86_64-darwin"
   ];
 
-  # The parts every Rust project has: the toolchain rust-toolchain.toml
-  # names, the formatting and clippy checks, the formatter and the dev
-  # shell.
-  #
-  # `extraSrc` lists the files the build reads besides the Rust sources and
-  # Cargo files, such as an `include_str!` asset. `devPackages` are added to
-  # the dev shell.
-  mkRustProject =
+  # Everything `mkRustProject` sets up, including what `mkRustService`
+  # builds on.
+  projectParts =
     {
       self,
       system,
       name,
       root,
       extraSrc ? [ ],
-      devPackages ? [ ],
+      devPackages ? _: [ ],
     }:
     let
       pkgs = nixpkgs.legacyPackages.${system};
 
-      # A release newer than the locked rust-overlay needs
-      # `nix flake update rust-overlay` in the framework first.
       toolchain = (rust-overlay.lib.mkRustBin { } pkgs).fromRustupToolchainFile (
         root + "/rust-toolchain.toml"
       );
@@ -72,7 +64,10 @@ let
       };
 
       # The dependencies, built once and reused by the build and the checks.
-      cargoArtifacts = craneLib.buildDepsOnly common;
+      # The check covers what clippy checks, so clippy rebuilds none of them.
+      cargoArtifacts = craneLib.buildDepsOnly (
+        common // { cargoCheckExtraArgs = "--workspace --all-targets --all-features"; }
+      );
     in
     {
       inherit
@@ -105,11 +100,27 @@ let
           pkgs.just
           pkgs.git
         ]
-        ++ devPackages;
+        ++ devPackages pkgs;
 
         # lets rust-analyzer find std sources
         RUST_SRC_PATH = "${toolchain}/lib/rustlib/src/rust/library";
       };
+    };
+
+  # The parts every Rust project has: the formatting and clippy checks, the
+  # formatter and the dev shell, all on the toolchain rust-toolchain.toml
+  # names.
+  #
+  # `extraSrc` lists the files the build reads besides the Rust sources and
+  # Cargo files, such as an `include_str!` asset or a test fixture.
+  # `devPackages` is `pkgs: [ ... ]`, the tools added to the dev shell.
+  mkRustProject =
+    args:
+    let
+      parts = projectParts args;
+    in
+    {
+      inherit (parts) formatter checks devShell;
     };
 
   # Turns `f system` into flake outputs: `{ packages = ...; }` for each
@@ -123,8 +134,8 @@ let
   # A service: `mkRustProject`, plus the package with every binary, an image
   # per binary, and the apps that publish them.
   #
-  # `images.<binary>` takes `ports`, `env`, `contents` and `uid`, all
-  # optional. `registry` is where the images go, such as
+  # `images.<binary>` takes `ports` (TCP), `env`, `contents` (`pkgs: [ ... ]`)
+  # and `uid`, all optional. `registry` is where the images go, such as
   # `ghcr.io/<owner>`; `source` is the repo URL for the image label.
   mkRustService =
     {
@@ -135,7 +146,7 @@ let
       ...
     }@args:
     let
-      project = mkRustProject (
+      project = projectParts (
         removeAttrs args [
           "images"
           "registry"
@@ -151,6 +162,7 @@ let
         ;
       inherit (args) name;
       buildSha = buildShaOf args.self;
+      registry' = lib.removeSuffix "/" registry;
 
       package = craneLib.buildPackage (
         common
@@ -170,13 +182,22 @@ let
         {
           ports ? [ ],
           env ? { },
-          contents ? [ ],
+          contents ? _: [ ],
           uid ? 65532,
         }:
         pkgs.dockerTools.streamLayeredImage {
           name = binary;
           tag = buildSha;
-          contents = [ pkgs.cacert ] ++ contents;
+          contents = [ pkgs.cacert ] ++ contents pkgs;
+          # A writable /tmp, and a user for the uid, so temp files and $HOME
+          # work. The test fails the build when `binary` isn't one.
+          extraCommands = ''
+            test -x ${package}/bin/${binary}
+            mkdir -m 1777 tmp
+            mkdir -p etc
+            echo "app:x:${toString uid}:${toString uid}::/tmp:/sbin/nologin" > etc/passwd
+            echo "app:x:${toString uid}:" > etc/group
+          '';
           config = {
             User = "${toString uid}:${toString uid}";
             Entrypoint = [ "${package}/bin/${binary}" ];
@@ -199,16 +220,21 @@ let
         binary: config: lib.nameValuePair "${binary}-image" (imageOf binary config)
       ) images;
 
-      # An app from nix/<name>.nix, for the images this build makes.
-      imageApp = name: {
-        type = "app";
-        program = lib.getExe (
-          pkgs.callPackage ./${name}.nix {
-            inherit buildSha registry;
+      # An app from nix/<app>.nix, for the images this build makes.
+      imageApp =
+        app:
+        let
+          script = pkgs.callPackage ./${app}.nix {
+            inherit buildSha;
+            registry = registry';
             images = lib.mapAttrs (binary: _: imagePackages."${binary}-image") images;
-          }
-        );
-      };
+          };
+        in
+        {
+          type = "app";
+          program = lib.getExe script;
+          inherit (script) meta;
+        };
 
       # dockerTools images are Linux-only.
       isLinux = pkgs.stdenv.hostPlatform.isLinux;
@@ -233,7 +259,6 @@ let
 in
 {
   inherit
-    systems
     eachSystem
     mkRustProject
     mkRustService

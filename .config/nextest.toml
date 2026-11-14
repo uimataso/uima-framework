@@ -1,4 +1,4 @@
-# The profile CI runs: `cargo nextest run --profile ci`.
+# The profile CI selects with `NEXTEST_PROFILE=ci`.
 [profile.ci]
 # Report every failing test, not only the first.
 fail-fast = false

@@ -1,6 +1,4 @@
-# The one toolchain for the dev shell, the checks and CI; flake.nix reads it.
-# `rust-version` in Cargo.toml is the oldest Rust the crates need, so it can
-# stay behind `channel`.
+# See docs/project-setup.md#toolchain.
 [toolchain]
 channel = "1.100.0"
 profile = "minimal"

@@ -1,0 +1,9 @@
+# A service with no dependencies, for the flake functions' tests.
+[package]
+name = "fixture"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+# Not part of the framework's workspace.
+[workspace]
