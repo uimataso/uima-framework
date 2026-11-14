@@ -14,6 +14,10 @@ jobs:
   ci:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    env:
+      # CI builds once from scratch, so incremental data only grows target/.
+      CARGO_INCREMENTAL: 0
+      CARGO_TERM_COLOR: always
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -41,12 +45,32 @@ jobs:
           purge-created: 0
           purge-primary-key: never
 
+      # The tests compile outside the nix store, so cargo's downloads and
+      # target/ are cached here. A new Cargo.lock restores the older
+      # downloads, which only lack the new crates.
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+          key: cargo-registry-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: cargo-registry-${{ runner.os }}-
+
+      # No restore-keys: a target/ restored for another Cargo.lock would carry
+      # stale builds into the next save.
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: target
+          key: cargo-target-${{ runner.os }}-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
+
       - name: CI
         run: nix develop -c just ci
 
       # cache-nix-action collects garbage before saving, and keeps only what
-      # a GC root holds. The dev shell holds the toolchain, and each check
-      # holds the dependencies it built.
+      # a GC root holds. The dev shell holds the toolchain, each check holds
+      # the dependencies it built, and the flake inputs are rooted so they
+      # aren't unpacked again.
       - name: Keep the build in the cache
         run: |
           system=$(nix eval --impure --raw --expr builtins.currentSystem)
@@ -55,3 +79,5 @@ jobs:
           nix eval --json ".#checks.$system" --apply builtins.attrNames \
             | jq -r --arg system "$system" '.[] | ".#checks.\($system).\(.)"' \
             | xargs nix build --out-link .gcroots/check
+          nix flake archive --json | jq -r '.. | .path? // empty' \
+            | xargs nix-store --add-root .gcroots/input --realise >/dev/null

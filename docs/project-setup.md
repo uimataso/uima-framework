@@ -86,6 +86,9 @@ Each project's workflow runs on its own CI host, in three stages:
 - **Triggers**: `push` and `workflow_dispatch`. Every job has a timeout.
 - **Nix cache**: the store is kept between runs, by `cache-nix-action` on GitHub and by a volume on
   the Forgejo runner.
+- **Cargo cache**: the tests compile outside the store, so cargo's downloads and `target/` are
+  cached too. The downloads may restore from an older `Cargo.lock`; `target/` only from the same
+  `Cargo.lock` and `rust-toolchain.toml`, so stale builds don't pile up.
 
 ### Image retention
 
