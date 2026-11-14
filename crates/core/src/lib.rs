@@ -1,4 +1,4 @@
-//! Value types every uima service shares: validating newtype macros, PATCH-style updates, and the
+//! Value types my services share: validating newtype macros, PATCH-style updates, and the
 //! port error.
 //!
 //! # Newtypes

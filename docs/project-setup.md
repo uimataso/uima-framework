@@ -1,6 +1,6 @@
 # Project setup
 
-What a uima project's repo has around its code, and how to set it up. This repo follows it, so its
+What a project's repo has around its code, and how to set it up. This repo follows it, so its
 own files are the working example.
 
 ## Recipes

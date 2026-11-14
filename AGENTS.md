@@ -2,7 +2,7 @@
 
 Guidelines for agents (and humans) working in this repo.
 
-uima-framework holds the shared Rust crates, style guide, CI and nix setup for the uima services:
+uima-framework holds the shared Rust crates, style guide, CI and nix setup for my services:
 sowah, nova-el, techo and genkan.
 
 - How to write the code: `docs/style-guide/`.

@@ -1,6 +1,6 @@
 # uima-framework
 
-The common base for uima's services: shared crates, one style guide, and the nix and CI setup they
+The common base for my services: shared crates, one style guide, and the nix and CI setup they
 all build with.
 
 - Style guide: [docs/style-guide/](docs/style-guide/README.md)

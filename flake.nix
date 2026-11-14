@@ -1,5 +1,5 @@
 {
-  description = "uima-framework: the common base for uima's services";
+  description = "uima-framework: the common base for my services";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
