@@ -8,11 +8,15 @@ rust-version = "1.100"
 edition = "2024"
 authors = ["uima"]
 
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
 [workspace.lints.clippy]
-uninlined_format_args = "allow"
-unused_async = "allow"
-option_option = "allow"
-manual_map = "allow"
+allow_attributes_without_reason = "warn"
+dbg_macro = "warn"
+print_stderr = "warn"
+print_stdout = "warn"
+todo = "warn"
 
 [workspace.dependencies]
 # local crates

@@ -19,7 +19,7 @@ fmt-check:
 
 # lint (warnings are errors)
 lint:
-    cargo clippy --workspace --all-targets -- -D warnings
+    cargo clippy --workspace --all-targets --all-features -- -D warnings
 
 # full pre-commit gate: formatting + lint + tests
 check: fmt-check lint test

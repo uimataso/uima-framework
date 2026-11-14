@@ -27,5 +27,19 @@ in `.git-blame-ignore-revs`. GitHub and Forgejo read the file on their own; loca
 <full commit sha>
 ```
 
+## Lints
+
+Clippy's default lints, plus a few more that the project's `Cargo.toml` turns on.
+
+- **The lint table**: copy this repo's `[workspace.lints]` from [`Cargo.toml`](../Cargo.toml).
+  Cargo can't share lints across repos, so each project keeps its own copy. Keep the lints at
+  `warn`, not `deny`, so code in progress still builds.
+- **Workspaces**: the table goes in `[workspace.lints]`, and every crate opts in with
+  `[lints] workspace = true`; without that, the crate gets none of them. A single-crate project
+  puts the table in `[lints]`.
+- **`justfile`**: `lint` runs `cargo clippy --workspace --all-targets --all-features -- -D warnings`,
+  as part of `check`. `--all-features` lints the code behind the `testing` feature too. The flake's
+  check runs the same command.
+
 [treefmt]: https://github.com/numtide/treefmt
 [treefmt-nix]: https://github.com/numtide/treefmt-nix
