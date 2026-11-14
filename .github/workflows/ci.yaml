@@ -27,7 +27,7 @@ jobs:
       # Saves /nix/store between runs (toolchain, crates, earlier builds).
       # The key changes with anything that changes what gets built; a miss
       # restores the newest older cache and saves a new one at the end.
-      - uses: nix-community/cache-nix-action@135667ec418502fa5a3598af6fb9eb733888ce6a # v6.1.3
+      - uses: nix-community/cache-nix-action@7df957e333c1e5da7721f60227dbba6d06080569 # v7.0.2
         with:
           primary-key: nix-${{ runner.os }}-${{ hashFiles('flake.lock', '**/*.nix', 'rust-toolchain.toml', 'Cargo.lock') }}
           restore-prefixes-first-match: nix-${{ runner.os }}-
