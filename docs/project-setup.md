@@ -19,14 +19,22 @@ Every project's `justfile` has these recipes, and adds its own (such as `run`) b
 `nix flake check` runs the same checks as `check`; the tests stay out of it (see [Tests](#tests)).
 Before a commit, run `just check test`.
 
+## Flake
+
+A project's `flake.nix` calls the framework's flake functions, in [`nix/lib.nix`](../nix/lib.nix),
+which list their parameters: `mkRustService` for a service, `mkRustProject` for a library. They
+return one system's outputs; the project places them with `eachSystem`, so its own `flake.nix`
+shows what it outputs, and an extra check or app goes beside them with `//`. This repo's
+[`flake.nix`](../flake.nix) is the library example.
+
 ## Toolchain
 
 - **`rust-toolchain.toml`** at the repo root is the only place the Rust version is written. Copy
   this repo's [`rust-toolchain.toml`](../rust-toolchain.toml), components included. It names an
   exact release, not `stable`, so a new release's lints can't break a build that passed.
-- **`flake.nix`** reads it with [rust-overlay] for the build, the checks and the dev shell, so CI
-  gets the same release. See `toolchainFor` in this repo's [`flake.nix`](../flake.nix). A release
-  newer than the locked rust-overlay needs `nix flake update rust-overlay` first.
+- **The flake functions** read it with [rust-overlay] for the build, the checks and the dev shell,
+  so CI gets the same release. A release newer than the framework's locked rust-overlay needs
+  `nix flake update rust-overlay` in this repo first.
 - **Bumping**: each project bumps on its own schedule, within what
   [depending on the framework](crates.md#depending-on-the-framework) allows.
 - **`rust-version`**: a library sets it to the oldest Rust it builds with. A service leaves it out;
@@ -34,12 +42,13 @@ Before a commit, run `just check test`.
 
 ## Build
 
-`flake.nix` builds with [crane]. See the `clippy` check in this repo's [`flake.nix`](../flake.nix).
+`mkRustService` builds with [crane].
 
 - **Dependencies** build once in their own derivation and are reused by the build and the checks,
   so a change to the project's code doesn't rebuild them. Git dependencies need no hash.
 - **Sources**: `cleanCargoSource`, which keeps the Rust sources and Cargo files. Add any other file
-  the build reads, such as `migrations/` for `sqlx::migrate!` or an asset under `include_str!`.
+  the build reads, such as `migrations/` for `sqlx::migrate!` or an asset under `include_str!`,
+  through `extraSrc`.
 - **Packages** are named, with no `packages.default`: `packages.<project>` holds every binary of
   the workspace, built once. A single-binary project sets `meta.mainProgram`, so
   `nix run .#<project>` runs it.
@@ -55,7 +64,7 @@ Before a commit, run `just check test`.
 
 ## Image
 
-`flake.nix` builds an image per binary, `packages.<binary>-image`, with nix's
+`mkRustService` builds an image per binary in `images`, `packages.<binary>-image`, with nix's
 `dockerTools.streamLayeredImage`; there is no Dockerfile.
 
 - **Contents**: the binary and the CA certificates (`SSL_CERT_FILE` points at them). A project adds
@@ -80,7 +89,8 @@ Each project's workflow runs on its own CI host, in three stages:
 3. **A release tag** (`v1.2.3`): tag the image main already built for that commit as `1.2.3`,
    without rebuilding it, so production runs the image dev ran.
 
-- **Publishing** goes through the flake's apps, so CI and a local run push the same way. The CI
+- **Publishing** goes through the flake's apps, `publish-image` and `tag-image`, so CI and a local
+  run push the same way. The CI
   host only logs in to the registry.
 - **Actions** (GitHub) are pinned to a commit sha, with the version in a comment.
 - **Triggers**: `push` and `workflow_dispatch`. Every job has a timeout.
@@ -101,7 +111,7 @@ Each registry's own cleanup rules keep:
 ## Dev shell
 
 `nix develop` gives the toolchain and every tool the recipes run. A project adds the tools its own
-recipes and tests need beside them.
+recipes and tests need through `devPackages`.
 
 ## Formatting
 
@@ -111,9 +121,9 @@ Every file in the repo is formatted, not only Rust, with [treefmt] through [tree
   [`treefmt.nix`](../treefmt.nix) and add a formatter for each other kind of file the project has.
 - **rustfmt** comes from the toolchain `rust-toolchain.toml` pins, so the formatting doesn't change
   with whichever rustfmt is on `PATH`. It runs with its defaults: no `rustfmt.toml`.
-- **`flake.nix`** turns `treefmt.nix` into the `formatter` (`nix fmt`), a `formatting` check, and a
-  `treefmt` in the dev shell. See `treefmtFor` and its uses in this repo's
-  [`flake.nix`](../flake.nix).
+- **The flake functions** turn `treefmt.nix` into the `formatter` (`nix fmt`), a `formatting`
+  check, and a `treefmt` in the dev shell. They also add a `cargo-sort` program, which
+  treefmt-nix doesn't have.
 
 When adding formatting to an existing repo, format everything in a commit of its own and list it
 in `.git-blame-ignore-revs`. GitHub and Forgejo read the file on their own; locally, run
