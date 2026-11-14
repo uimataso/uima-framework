@@ -3,4 +3,5 @@
 # stay behind `channel`.
 [toolchain]
 channel = "1.100.0"
+profile = "minimal"
 components = ["rustfmt", "clippy", "rust-src", "rust-analyzer"]
