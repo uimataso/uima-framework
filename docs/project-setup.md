@@ -102,6 +102,8 @@ Each project's workflow runs on its own CI host, in three stages:
   | `release-version <tag>`                     | Prints the version a release tag names: `v1.2.3` gives `1.2.3`.               |
   | `is-tip <branch> <sha>`                     | Prints `true` at the branch's tip on `origin`, `false` elsewhere.             |
 
+- **Forgejo jobs** run in a `nixos/nix` container, which has no node for actions/checkout; this
+  repo's [`actions/`](../actions) check out and log in to the registry with shell steps instead.
 - **Publish jobs** run only for main and release tags. They log in to the registry and have an
   `origin` they can read.
 - **Registry credentials**: on GitHub, an environment that only main and release tags may deploy

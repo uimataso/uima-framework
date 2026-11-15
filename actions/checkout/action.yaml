@@ -1,0 +1,40 @@
+# Checks out a commit with plain git, for a job container without node,
+# which actions/checkout needs. The remote is `origin`, which is-tip reads.
+name: Check out
+description: Fetch a commit with git, with an `origin` remote
+inputs:
+  repository:
+    description: The repo, as `<owner>/<name>` on this host
+    default: ${{ github.repository }}
+  ref:
+    description: The commit, branch or tag to check out
+    default: ${{ github.sha }}
+  fetch-depth:
+    description: How many commits to fetch; 0 fetches the whole history
+    default: "1"
+  path:
+    description: The directory to check out into
+    default: .
+  token:
+    description: A token that can read the repo
+    default: ${{ github.token }}
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        REPOSITORY: ${{ inputs.repository }}
+        REF: ${{ inputs.ref }}
+        DEPTH: ${{ inputs.fetch-depth }}
+        DIR: ${{ inputs.path }}
+        TOKEN: ${{ inputs.token }}
+      run: |
+        git init -q "$DIR"
+        cd "$DIR"
+        git remote add origin "https://token:${TOKEN}@${GITHUB_SERVER_URL#https://}/${REPOSITORY}.git"
+        depth=()
+        if [[ $DEPTH != 0 ]]; then
+          depth=(--depth "$DEPTH")
+        fi
+        git fetch -q "${depth[@]}" origin "$REF"
+        git checkout -q FETCH_HEAD

@@ -1,0 +1,25 @@
+# Logs skopeo in to a registry, so publish-image and tag-image can push.
+# Runs skopeo from the checked-out flake's nixpkgs.
+name: Log in to the registry
+description: Log skopeo in to a container registry
+inputs:
+  registry:
+    description: The registry's host
+    required: true
+  username:
+    description: The user the password belongs to
+    default: ${{ github.repository_owner }}
+  password:
+    description: A token that can push to the registry
+    required: true
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        REGISTRY: ${{ inputs.registry }}
+        USERNAME: ${{ inputs.username }}
+        PASSWORD: ${{ inputs.password }}
+      run: |
+        echo "$PASSWORD" | nix shell --inputs-from . nixpkgs#skopeo -c \
+          skopeo login -u "$USERNAME" --password-stdin "$REGISTRY"
