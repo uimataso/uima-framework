@@ -230,15 +230,11 @@ let
         binary: config: lib.nameValuePair "${binary}-image" (imageOf binary config)
       ) images;
 
-      # An app from nix/<app>.nix, for the images this build makes.
-      imageApp =
-        app:
+      # An app from nix/<app>.nix, called with `args`.
+      appOf =
+        app: args:
         let
-          script = pkgs.callPackage ./${app}.nix {
-            inherit buildSha;
-            registry = registry';
-            images = lib.mapAttrs (binary: _: imagePackages."${binary}-image") images;
-          };
+          script = pkgs.callPackage ./${app}.nix args;
         in
         {
           type = "app";
@@ -262,8 +258,18 @@ let
       };
 
       apps = lib.optionalAttrs (isLinux && registry != null && images != { }) {
-        publish-image = imageApp "publish-image";
-        tag-image = imageApp "tag-image";
+        publish-image = appOf "publish-image" {
+          inherit buildSha;
+          registry = registry';
+          images = lib.mapAttrs (binary: _: imagePackages."${binary}-image") images;
+        };
+        tag-image = appOf "tag-image" {
+          registry = registry';
+          binaries = lib.attrNames images;
+        };
+        build-sha = appOf "build-sha" { inherit buildSha; };
+        release-version = appOf "release-version" { };
+        is-tip = appOf "is-tip" { };
       };
     };
 in

@@ -65,16 +65,16 @@ let
     testApps = {
       expr = lib.attrNames service.apps;
       expected = [
+        "build-sha"
+        "is-tip"
         "publish-image"
+        "release-version"
         "tag-image"
       ];
     };
     testAppPrograms = {
-      expr = lib.mapAttrs (_: app: baseNameOf app.program) service.apps;
-      expected = {
-        publish-image = "publish-image";
-        tag-image = "tag-image";
-      };
+      expr = lib.filterAttrs (name: app: baseNameOf app.program != name) service.apps;
+      expected = { };
     };
     testNoRegistryNoApps = {
       expr = (serviceWith { registry = null; }).apps;
@@ -101,11 +101,8 @@ let
       expected = "fixture";
     };
     testAppsHaveDescriptions = {
-      expr = lib.mapAttrs (_: app: app.meta ? description) service.apps;
-      expected = {
-        publish-image = true;
-        tag-image = true;
-      };
+      expr = lib.filterAttrs (_: app: !(app.meta ? description)) service.apps;
+      expected = { };
     };
   };
 
@@ -145,13 +142,19 @@ let
         ;;
     esac
   '';
+  # git's origin has main at $STUB_TIP, or no main when it's empty, and
+  # always a branch whose name ends in main; $STUB_GIT_FAIL fails it.
   stubGit = pkgs.writeShellScriptBin "git" ''
     if [[ "$*" != "ls-remote origin refs/heads/main" ]]; then
       echo "unexpected git $*" >> "$STUB_BAD"
       exit 3
     fi
-    # Like git, nothing when origin has no main.
-    if [[ -n $STUB_TIP ]]; then
+    if [[ -n ''${STUB_GIT_FAIL:-} ]]; then
+      echo "fatal: could not read from remote repository" >&2
+      exit 128
+    fi
+    printf '%s\trefs/heads/old/main\n' ffffffffffffffffffffffffffffffffffffffff
+    if [[ -n ''${STUB_TIP:-} ]]; then
       printf '%s\trefs/heads/main\n' "$STUB_TIP"
     fi
   '';
@@ -163,27 +166,28 @@ let
       touch $out
     '';
 
-  scriptFor =
-    file: buildSha:
+  # The app from `file`, called with `args`, on the stubs.
+  appFor =
+    file: args:
     lib.getExe (
-      lib.callPackageWith
-        (
-          pkgs
-          // {
-            skopeo = stubSkopeo;
-            git = stubGit;
-          }
-        )
-        file
-        {
-          inherit buildSha;
-          registry = "registry.test/owner";
-          images = {
-            a = pkgs.writeShellScript "stream-a" "echo image-a";
-            b = pkgs.writeShellScript "stream-b" "echo image-b";
-          };
+      lib.callPackageWith (
+        pkgs
+        // {
+          skopeo = stubSkopeo;
+          git = stubGit;
         }
+      ) file args
     );
+  publishFor =
+    buildSha:
+    appFor ./publish-image.nix {
+      inherit buildSha;
+      registry = "registry.test/owner";
+      images = {
+        a = pkgs.writeShellScript "stream-a" "echo image-a";
+        b = pkgs.writeShellScript "stream-b" "echo image-b";
+      };
+    };
 in
 {
   test-lib =
@@ -225,10 +229,12 @@ in
 
         # The apps push this build, to the registry without its trailing
         # slash.
-        for app in ${service.apps.publish-image.program} ${service.apps.tag-image.program}; do
-          grep -q '^sha=${sha}$' $app
-          grep -q 'docker://registry.test/owner/fixture:' $app
-        done
+        publish=${service.apps.publish-image.program}
+        grep -q '^sha=${sha}$' $publish
+        grep -q 'docker://registry.test/owner/fixture:' $publish
+        grep -qE "^registry='?registry\.test/owner'?$" ${service.apps.tag-image.program}
+        grep -qE "^binaries=\('?fixture'?\)$" ${service.apps.tag-image.program}
+        [[ $(${service.apps.build-sha.program}) == ${sha} ]]
         touch $out
       '';
 
@@ -241,10 +247,19 @@ in
         STUB_REGISTRY = "registry";
       }
       ''
-        publish=${scriptFor ./publish-image.nix sha}
-        publish_dirty=${scriptFor ./publish-image.nix "${sha}-dirty"}
-        tag=${scriptFor ./tag-image.nix sha}
-        tag_dirty=${scriptFor ./tag-image.nix "${sha}-dirty"}
+        publish=${publishFor sha}
+        publish_dirty=${publishFor "${sha}-dirty"}
+        tag=${
+          appFor ./tag-image.nix {
+            registry = "registry.test/owner";
+            binaries = [
+              "a"
+              "b"
+            ];
+          }
+        }
+        version=${appFor ./release-version.nix { }}
+        is_tip=${appFor ./is-tip.nix { }}
         reg=registry.test/owner
 
         fail() { echo "FAIL: $*"; cat "$STUB_LOG"; exit 1; }
@@ -254,91 +269,96 @@ in
           shift
           : > "$STUB_LOG"
           : > "$STUB_BAD"
-          "$@" 2>/dev/null || got=$?
+          "$@" > out 2>/dev/null || got=$?
           [[ ! -s $STUB_BAD ]] || fail "$*: $(cat "$STUB_BAD")"
           [[ $got == "$want" ]] || fail "$* exited $got, want $want"
         }
         logged() { grep -qxF "$1" "$STUB_LOG" || fail "not run: $1"; }
         no_copy() { ! grep -q '^copy' "$STUB_LOG" || fail "copied"; }
 
+        # publish-image pushes this build under its sha, and nothing else.
         expect 0 $publish
         logged "copy docker-archive:/dev/stdin docker://$reg/a:${sha}"
         logged "copy docker-archive:/dev/stdin docker://$reg/b:${sha}"
-
-        export STUB_TIP=${rev}
-        expect 0 $publish edge
-        logged "copy docker://$reg/a:${sha} docker://$reg/a:edge"
-        logged "copy docker://$reg/b:${sha} docker://$reg/b:edge"
-
-        # A tag may hold a version, as long as it isn't one.
-        expect 0 $publish edge-1.2.3
-        logged "copy docker://$reg/a:${sha} docker://$reg/a:edge-1.2.3"
-
-        # The longest tag a registry takes.
-        long=$(printf 'a%.0s' {1..128})
-        expect 0 $publish "$long"
-        logged "copy docker://$reg/a:${sha} docker://$reg/a:$long"
-
-        export STUB_TIP=ffffffffffffffffffffffffffffffffffffffff
-        expect 0 $publish edge
-        ! grep -q ':edge' "$STUB_LOG" || fail "moved edge after main moved on"
-
-        export STUB_TIP=
-        expect 1 $publish edge
-        ! grep -q ':edge' "$STUB_LOG" || fail "moved edge with no main"
-
-        # A broken push fails the app.
-        STUB_BROKEN=$reg/a:${sha} expect 1 $publish
-
-        # Not a tag, or the tag of a build or a release.
-        for bad in a/b .x "a$long" ${sha} 1.2.3; do
-          expect 1 $publish "$bad"
-          no_copy
-        done
+        [[ $(grep -c . "$STUB_LOG") == 2 ]] || fail "pushed more than the sha"
+        expect 1 $publish latest
+        no_copy
         expect 1 $publish_dirty
         no_copy
+        STUB_BROKEN=$reg/a:${sha} expect 1 $publish
 
+        # tag-image copies the sha to each tag, on every image.
         printf '%s\n' "$reg/a:${sha} sha256:a" "$reg/b:${sha} sha256:b" > "$STUB_REGISTRY"
-        expect 0 $tag v1.2.3
-        logged "copy docker://$reg/a:${sha} docker://$reg/a:1.2.3"
-        logged "copy docker://$reg/b:${sha} docker://$reg/b:1.2.3"
+        long=$(printf 'a%.0s' {1..128})
+        expect 0 $tag ${sha} latest "$long"
+        for image in a b; do
+          logged "copy docker://$reg/$image:${sha} docker://$reg/$image:latest"
+          logged "copy docker://$reg/$image:${sha} docker://$reg/$image:$long"
+        done
 
-        for bad in foo 1.2 1.2.3-rc1 x1.2.3 1a2b3; do
-          expect 1 $tag "$bad"
+        # Not a sha, not a tag, or nothing to tag. The registry has the
+        # refs, so only the check refuses them.
+        for image in a b; do
+          printf "%s\n" "$reg/$image:${sha}-dirty sha256:$image" "$reg/$image:${rev} sha256:$image" >> "$STUB_REGISTRY"
+        done
+        for bad in ${sha}-dirty 0123 ${rev}; do
+          expect 1 $tag "$bad" latest
           no_copy
         done
-        # A dirty build is refused even when the registry has it.
-        printf '%s\n' "$reg/a:${sha}-dirty sha256:a" "$reg/b:${sha}-dirty sha256:b" >> "$STUB_REGISTRY"
-        expect 1 $tag_dirty 1.2.3
-        no_copy
+        for bad in a/b .x -x "a$long"; do
+          expect 1 $tag ${sha} latest "$bad"
+          no_copy
+        done
+        expect 1 $tag ${sha}
+        expect 1 $tag --no-overwrite ${sha}
 
-        # A re-run for the same images is fine; another image is refused.
-        echo "$reg/a:1.2.3 sha256:a" >> "$STUB_REGISTRY"
-        expect 0 $tag 1.2.3
+        # Without --no-overwrite a tag moves; with it, a tag on another image
+        # is refused, and one on the same image is a re-run.
         echo "$reg/b:1.2.3 sha256:other" >> "$STUB_REGISTRY"
-        expect 1 $tag 1.2.3
+        expect 0 $tag ${sha} 1.2.3
+        logged "copy docker://$reg/b:${sha} docker://$reg/b:1.2.3"
+        expect 1 $tag --no-overwrite ${sha} 1.2.4 1.2.3
         no_copy
-
-        # A missing release is told apart by its status or its message.
-        STUB_MISSING_ERR= expect 0 $tag 1.2.4
-        logged "copy docker://$reg/b:${sha} docker://$reg/b:1.2.4"
-        STUB_MISSING_STATUS=1 expect 0 $tag 1.2.5
+        echo "$reg/a:1.2.5 sha256:a" >> "$STUB_REGISTRY"
+        expect 0 $tag --no-overwrite ${sha} 1.2.5
         logged "copy docker://$reg/b:${sha} docker://$reg/b:1.2.5"
 
-        # A release that can't be looked up is refused, not overwritten.
-        STUB_BROKEN=$reg/b:1.2.6 expect 1 $tag 1.2.6
-        no_copy
-        STUB_MISSING_STATUS=1 STUB_MISSING_ERR=denied expect 1 $tag 1.2.6
-        no_copy
+        # A missing tag is told apart by its status or its message.
+        STUB_MISSING_ERR= expect 0 $tag --no-overwrite ${sha} 1.2.6
+        STUB_MISSING_STATUS=1 expect 0 $tag --no-overwrite ${sha} 1.2.6
 
-        # So is a build that can't be looked up.
-        STUB_BROKEN=$reg/b:${sha} expect 1 $tag 1.2.6
+        # A tag or a build that can't be looked up is refused.
+        STUB_BROKEN=$reg/b:1.2.6 expect 1 $tag --no-overwrite ${sha} 1.2.6
+        no_copy
+        STUB_MISSING_STATUS=1 STUB_MISSING_ERR=denied expect 1 $tag --no-overwrite ${sha} 1.2.6
+        no_copy
+        STUB_BROKEN=$reg/b:${sha} expect 1 $tag ${sha} latest
         no_copy
 
         # A missing build is refused before anything is tagged.
         echo "$reg/a:${sha} sha256:a" > "$STUB_REGISTRY"
-        expect 1 $tag 1.2.6
+        expect 1 $tag ${sha} latest
         no_copy
+
+        # release-version reads a release tag's version.
+        for ref in v1.2.3 refs/tags/v1.2.3; do
+          expect 0 $version "$ref"
+          [[ $(cat out) == 1.2.3 ]] || fail "$ref gave $(cat out)"
+        done
+        for bad in 1.2.3 v1.2 v1.2.3-rc1 refs/heads/v1.2.3 xv1.2.3 ""; do
+          expect 1 $version "$bad"
+        done
+        expect 1 $version
+
+        # is-tip: 0 at main's tip, 1 behind it, 2 when it can't tell.
+        export STUB_TIP=${rev}
+        expect 0 $is_tip main ${sha}
+        expect 0 $is_tip main ${rev}
+        expect 1 $is_tip main ffffffffffff
+        expect 2 $is_tip main ${sha}-dirty
+        expect 2 $is_tip main
+        STUB_GIT_FAIL=1 expect 2 $is_tip main ${sha}
+        STUB_TIP= expect 2 $is_tip main ffffffffffff
 
         touch $out
       '';
