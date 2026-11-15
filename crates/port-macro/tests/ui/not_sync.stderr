@@ -1,0 +1,31 @@
+error[E0277]: `Cell<u64>` cannot be shared between threads safely
+  --> tests/ui/not_sync.rs:13:16
+   |
+13 |       #[has_port(Clock)]
+   |  ________________^
+14 | |     clock: Counter,
+   | |__________________^ `Cell<u64>` cannot be shared between threads safely
+   |
+   = help: within `Counter`, the trait `Sync` is not implemented for `Cell<u64>`
+   = note: if you want to do aliasing and mutation between multiple threads, use `std::sync::RwLock` or `std::sync::atomic::AtomicU64` instead
+help: the following other types implement trait `HasClock`
+  --> tests/ui/not_sync.rs:5:1
+   |
+ 5 | #[has_port]
+   | ^^^^^^^^^^^ `Arc<T>`
+...
+11 | #[derive(HasPort)]
+   |          ^^^^^^^ `Ctx`
+note: required because it appears within the type `Counter`
+  --> tests/ui/not_sync.rs:8:16
+   |
+ 8 | struct Counter(Cell<u64>);
+   |                ^^^^^^^^^ required by this field
+note: required for `Counter` to implement `HasClock`
+  --> tests/ui/not_sync.rs:5:1
+   |
+ 5 | #[has_port]
+   | ^^^^^^^^^^^
+ 6 | pub trait Clock {}
+   |           ^^^^^
+   = note: this error originates in the attribute macro `has_port` (in Nightly builds, run with -Z macro-backtrace for more info)

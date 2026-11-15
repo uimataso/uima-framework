@@ -1,0 +1,5 @@
+error: `HasPort` only supports structs
+ --> tests/ui/enum.rs:4:1
+  |
+4 | enum Ctx {
+  | ^^^^

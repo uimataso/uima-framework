@@ -1,0 +1,12 @@
+error[E0603]: trait `HasClock` is private
+ --> tests/ui/private_trait.rs:6:8
+  |
+6 | use m::HasClock;
+  |        ^^^^^^^^ private trait
+  |
+note: the trait `HasClock` is defined here
+ --> tests/ui/private_trait.rs:2:5
+  |
+2 |     #[uima_port_macro::has_port]
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  = note: this error originates in the attribute macro `uima_port_macro::has_port` (in Nightly builds, run with -Z macro-backtrace for more info)

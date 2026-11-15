@@ -1,0 +1,11 @@
+error: the getter `type` for this port would be a keyword; rename the port
+ --> tests/ui/keyword_getter.rs:2:11
+  |
+2 | pub trait Type {}
+  |           ^^^^
+
+error: the getter `match` for this port would be a keyword; rename the port
+ --> tests/ui/keyword_getter.rs:5:11
+  |
+5 | pub trait r#Match {}
+  |           ^^^^^^^

@@ -1,0 +1,32 @@
+error[E0277]: `Ctx` doesn't provide a `Mailer`
+  --> tests/ui/context_lacks_port.rs:21:10
+   |
+21 |     send(&Ctx { clock: System });
+   |     ---- ^^^^^^^^^^^^^^^^^^^^^^ unsatisfied trait bound
+   |     |
+   |     required by a bound introduced by this call
+   |
+help: the trait `Mailer` is not implemented for `Ctx`
+  --> tests/ui/context_lacks_port.rs:13:1
+   |
+13 | struct Ctx {
+   | ^^^^^^^^^^
+   = note: implement `Mailer` for the adapter, or serve it from a field with `#[has_port(Mailer)]`
+help: this trait has no implementations, consider adding one
+  --> tests/ui/context_lacks_port.rs:7:1
+   |
+ 7 | pub trait Mailer {}
+   | ^^^^^^^^^^^^^^^^
+note: required for `Ctx` to implement `HasMailer`
+  --> tests/ui/context_lacks_port.rs:6:1
+   |
+ 6 | #[has_port]
+   | ^^^^^^^^^^^
+ 7 | pub trait Mailer {}
+   |           ^^^^^^ unsatisfied trait bound introduced here
+note: required by a bound in `send`
+  --> tests/ui/context_lacks_port.rs:18:12
+   |
+18 | fn send<C: HasMailer>(_: &C) {}
+   |            ^^^^^^^^^ required by this bound in `send`
+   = note: this error originates in the attribute macro `has_port` (in Nightly builds, run with -Z macro-backtrace for more info)

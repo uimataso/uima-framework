@@ -1,0 +1,5 @@
+error: `has_port` needs at least one port
+ --> tests/ui/empty_list.rs:5:7
+  |
+5 |     #[has_port()]
+  |       ^^^^^^^^

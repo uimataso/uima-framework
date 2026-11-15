@@ -1,0 +1,10 @@
+error[E0119]: conflicting implementations of trait `HasClock` for type `Arc<System>`
+ --> tests/ui/arc_impl.rs:3:1
+  |
+3 | #[uima_port_macro::has_port]
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  | |
+  | first implementation here
+  | conflicting implementation for `Arc<System>`
+  |
+  = note: this error originates in the attribute macro `uima_port_macro::has_port` (in Nightly builds, run with -Z macro-backtrace for more info)

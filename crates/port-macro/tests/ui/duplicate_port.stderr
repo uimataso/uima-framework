@@ -1,0 +1,5 @@
+error: another field already serves `Clock`
+  --> tests/ui/duplicate_port.rs:13:16
+   |
+13 |     #[has_port(Clock)]
+   |                ^^^^^

@@ -1,0 +1,27 @@
+error[E0277]: `NotAClock` doesn't provide a `Clock`
+  --> tests/ui/missing_port.rs:10:16
+   |
+10 |       #[has_port(Clock)]
+   |  ________________^
+11 | |     clock: NotAClock,
+   | |____________________^ unsatisfied trait bound
+   |
+help: the trait `Clock` is not implemented for `NotAClock`
+  --> tests/ui/missing_port.rs:6:1
+   |
+ 6 | struct NotAClock;
+   | ^^^^^^^^^^^^^^^^
+   = note: implement `Clock` for the adapter, or serve it from a field with `#[has_port(Clock)]`
+help: this trait has no implementations, consider adding one
+  --> tests/ui/missing_port.rs:4:1
+   |
+ 4 | pub trait Clock {}
+   | ^^^^^^^^^^^^^^^
+note: required for `NotAClock` to implement `HasClock`
+  --> tests/ui/missing_port.rs:3:1
+   |
+ 3 | #[has_port]
+   | ^^^^^^^^^^^
+ 4 | pub trait Clock {}
+   |           ^^^^^ unsatisfied trait bound introduced here
+   = note: this error originates in the attribute macro `has_port` (in Nightly builds, run with -Z macro-backtrace for more info)

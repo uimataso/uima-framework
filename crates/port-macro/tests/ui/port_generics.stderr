@@ -1,0 +1,5 @@
+error: a port takes no generics
+ --> tests/ui/port_generics.rs:5:21
+  |
+5 |     #[has_port(Clock<u8>)]
+  |                     ^

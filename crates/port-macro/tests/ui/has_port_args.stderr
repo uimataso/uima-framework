@@ -1,0 +1,5 @@
+error: `has_port` takes no arguments
+ --> tests/ui/has_port_args.rs:1:29
+  |
+1 | #[uima_port_macro::has_port(Send)]
+  |                             ^^^^

@@ -1,0 +1,5 @@
+error: `has_port` doesn't support generic traits
+ --> tests/ui/generic_trait.rs:2:15
+  |
+2 | pub trait Repo<T> {
+  |               ^

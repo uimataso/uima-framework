@@ -1,0 +1,5 @@
+error: `has_port` adds a getter `clock`, which this method would clash with
+ --> tests/ui/getter_clash.rs:3:8
+  |
+3 |     fn clock(&self) -> u64;
+  |        ^^^^^
