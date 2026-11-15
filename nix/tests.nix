@@ -106,6 +106,12 @@ let
       expr = service.packages.fixture.meta.mainProgram or null;
       expected = "fixture";
     };
+    testNativeLibs = {
+      expr =
+        map lib.getName
+          (serviceWith { nativeLibs = pkgs: [ pkgs.xz ]; }).packages.fixture.buildInputs;
+      expected = [ "xz" ];
+    };
     testAppsHaveDescriptions = {
       expr = lib.filterAttrs (_: app: !(app.meta ? description)) service.apps;
       expected = { };
@@ -519,4 +525,19 @@ in
         name = "warning";
         root = ./tests/warning;
       }).checks.clippy;
+
+  # The dev shell's pkg-config finds the `nativeLibs`, and only them.
+  test-dev-shell =
+    let
+      shell = (serviceWith { nativeLibs = pkgs: [ pkgs.xz ]; }).devShell;
+    in
+    pkgs.runCommand "test-dev-shell"
+      {
+        inherit (shell) nativeBuildInputs buildInputs;
+      }
+      ''
+        pkg-config --exists liblzma
+        ! pkg-config --exists zlib
+        touch $out
+      '';
 }

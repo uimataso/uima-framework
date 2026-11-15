@@ -35,6 +35,7 @@ let
       root,
       extraSrc ? [ ],
       devPackages ? _: [ ],
+      nativeLibs ? _: [ ],
     }:
     let
       pkgs = nixpkgs.legacyPackages.${system};
@@ -61,6 +62,8 @@ let
           fileset = lib.fileset.unions ([ (craneLib.fileset.commonCargoSources root) ] ++ extraSrc);
         };
         strictDeps = true;
+        nativeBuildInputs = [ pkgs.pkg-config ];
+        buildInputs = nativeLibs pkgs;
       };
 
       # The dependencies, built once and reused by the build and the checks.
@@ -99,8 +102,12 @@ let
           pkgs.cargo-nextest
           pkgs.just
           pkgs.git
+          # Ahead of any pkg-config on the host, which would link the host's
+          # libraries.
+          pkgs.pkg-config
         ]
         ++ devPackages pkgs;
+        buildInputs = nativeLibs pkgs;
 
         # lets rust-analyzer find std sources
         RUST_SRC_PATH = "${toolchain}/lib/rustlib/src/rust/library";
@@ -114,6 +121,8 @@ let
   # `extraSrc` lists the files the build reads besides the Rust sources and
   # Cargo files, such as an `include_str!` asset or a test fixture.
   # `devPackages` is `pkgs: [ ... ]`, the tools added to the dev shell.
+  # `nativeLibs` is `pkgs: [ ... ]`, the C libraries a crate finds through
+  # pkg-config, for the build and the dev shell.
   mkRustProject =
     args:
     let

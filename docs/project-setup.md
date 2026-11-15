@@ -59,6 +59,9 @@ The flake functions build with [crane].
   `cargo build`, and hands it to whatever reports it. A framework crate doesn't read it itself,
   since its value would be fixed when the dependencies are built.
 - **TLS** is rustls, not OpenSSL, so neither the build nor the image needs a system library.
+- **C libraries** a crate finds through pkg-config go in `nativeLibs`; the build, the dev shell and
+  the image then use the nix one. A library not listed isn't found, so a `-sys` crate that can
+  builds its bundled copy.
 - **Tests** don't run in the build; see [Tests](#tests).
 - **Profile**: Cargo's default release profile.
 
