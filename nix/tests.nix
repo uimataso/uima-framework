@@ -80,6 +80,11 @@ let
       expr = (serviceWith { registry = null; }).apps;
       expected = { };
     };
+    # dockerTools images are Linux-only.
+    testNoLinuxNoApps = {
+      expr = (serviceWith { system = "aarch64-darwin"; }).apps;
+      expected = { };
+    };
     testNoImagesNoApps = {
       expr = (serviceWith { images = { }; }).apps;
       expected = { };
@@ -110,9 +115,8 @@ let
   # arguments the apps must not pass, noting why in $STUB_BAD, since an app
   # may turn the failure into its own. The registry is a file of
   # `<ref> <digest>` lines; a ref in $STUB_BROKEN fails as an unreachable
-  # registry would. A missing ref fails as skopeo does, with exit 2 and
-  # "manifest unknown"; $STUB_MISSING_STATUS and $STUB_MISSING_ERR change
-  # either, as some registries do.
+  # registry would. A missing ref fails as skopeo does, with exit 2, or
+  # with $STUB_MISSING_STATUS.
   stubSkopeo = pkgs.writeShellScriptBin "skopeo" ''
     if [[ $1 != --insecure-policy ]]; then
       echo "skopeo without --insecure-policy" >> "$STUB_BAD"
@@ -135,7 +139,7 @@ let
         ;;
       inspect)
         if ! line=$(grep "^$ref " "$STUB_REGISTRY"); then
-          echo "''${STUB_MISSING_ERR-manifest unknown: manifest unknown}" >&2
+          echo "manifest unknown: manifest unknown" >&2
           exit "''${STUB_MISSING_STATUS:-2}"
         fi
         echo "''${line#* }"
@@ -231,8 +235,10 @@ in
         # slash.
         publish=${service.apps.publish-image.program}
         grep -q '^sha=${sha}$' $publish
-        grep -q 'docker://registry.test/owner/fixture:' $publish
-        grep -qE "^registry='?registry\.test/owner'?$" ${service.apps.tag-image.program}
+        grep -q '/fixture:$sha"' $publish
+        for app in $publish ${service.apps.tag-image.program}; do
+          grep -qE "^registry='?registry\.test/owner'?$" $app
+        done
         grep -qE "^binaries=\('?fixture'?\)$" ${service.apps.tag-image.program}
         [[ $(${service.apps.build-sha.program}) == ${sha} ]]
         touch $out
@@ -269,7 +275,7 @@ in
           shift
           : > "$STUB_LOG"
           : > "$STUB_BAD"
-          "$@" > out 2>/dev/null || got=$?
+          "$@" > out 2> err || got=$?
           [[ ! -s $STUB_BAD ]] || fail "$*: $(cat "$STUB_BAD")"
           [[ $got == "$want" ]] || fail "$* exited $got, want $want"
         }
@@ -290,9 +296,11 @@ in
         # tag-image copies the sha to each tag, on every image.
         printf '%s\n' "$reg/a:${sha} sha256:a" "$reg/b:${sha} sha256:b" > "$STUB_REGISTRY"
         long=$(printf 'a%.0s' {1..128})
-        expect 0 $tag ${sha} latest "$long"
+        expect 0 $tag ${sha} latest "$long" x Latest
         for image in a b; do
           logged "copy docker://$reg/$image:${sha} docker://$reg/$image:latest"
+          logged "copy docker://$reg/$image:${sha} docker://$reg/$image:x"
+          logged "copy docker://$reg/$image:${sha} docker://$reg/$image:Latest"
           logged "copy docker://$reg/$image:${sha} docker://$reg/$image:$long"
         done
 
@@ -323,17 +331,15 @@ in
         expect 0 $tag --no-overwrite ${sha} 1.2.5
         logged "copy docker://$reg/b:${sha} docker://$reg/b:1.2.5"
 
-        # A missing tag is told apart by its status or its message.
-        STUB_MISSING_ERR= expect 0 $tag --no-overwrite ${sha} 1.2.6
-        STUB_MISSING_STATUS=1 expect 0 $tag --no-overwrite ${sha} 1.2.6
-
         # A tag or a build that can't be looked up is refused.
         STUB_BROKEN=$reg/b:1.2.6 expect 1 $tag --no-overwrite ${sha} 1.2.6
         no_copy
-        STUB_MISSING_STATUS=1 STUB_MISSING_ERR=denied expect 1 $tag --no-overwrite ${sha} 1.2.6
+        # Only skopeo's status says a tag is missing, not the message.
+        STUB_MISSING_STATUS=1 expect 1 $tag --no-overwrite ${sha} 1.2.6
         no_copy
         STUB_BROKEN=$reg/b:${sha} expect 1 $tag ${sha} latest
         no_copy
+        grep -q unauthorized err || fail "the registry's error isn't shown"
 
         # A missing build is refused before anything is tagged.
         echo "$reg/a:${sha} sha256:a" > "$STUB_REGISTRY"
@@ -345,20 +351,28 @@ in
           expect 0 $version "$ref"
           [[ $(cat out) == 1.2.3 ]] || fail "$ref gave $(cat out)"
         done
-        for bad in 1.2.3 v1.2 v1.2.3-rc1 refs/heads/v1.2.3 xv1.2.3 ""; do
+        for bad in 1.2.3 v1.2 v1.2.3-rc1 v1.2.3rc v1x2x3 refs/heads/v1.2.3 xv1.2.3 ""; do
           expect 1 $version "$bad"
         done
         expect 1 $version
+        expect 1 $version v1.2.3 v1.2.4
 
-        # is-tip: 0 at main's tip, 1 behind it, 2 when it can't tell.
+        # is-tip: true at main's tip, false elsewhere, and fails when it
+        # can't tell.
+        tip() { expect 0 $is_tip main "$1"; [[ $(cat out) == "$2" ]] || fail "$1 gave $(cat out)"; }
         export STUB_TIP=${rev}
-        expect 0 $is_tip main ${sha}
-        expect 0 $is_tip main ${rev}
-        expect 1 $is_tip main ffffffffffff
-        expect 2 $is_tip main ${sha}-dirty
-        expect 2 $is_tip main
-        STUB_GIT_FAIL=1 expect 2 $is_tip main ${sha}
-        STUB_TIP= expect 2 $is_tip main ffffffffffff
+        tip ${sha} true
+        tip ${rev} true
+        tip ffffffffffff false
+        tip 3456789abcde false
+        tip 0123456789abffffffffffffffffffffffffffff false
+        for bad in ${sha}-dirty 0123456789a ${rev}0 0123456789AB; do
+          expect 1 $is_tip main "$bad"
+        done
+        expect 1 $is_tip main
+        expect 1 $is_tip main ${sha} extra
+        STUB_GIT_FAIL=1 expect 1 $is_tip main ${sha}
+        STUB_TIP= expect 1 $is_tip main ffffffffffff
 
         touch $out
       '';

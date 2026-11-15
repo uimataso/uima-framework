@@ -23,7 +23,7 @@ writeShellApplication {
       err=$(skopeo inspect --format '{{.Digest}}' "docker://$1" 2>&1 >&3) || status=$?
       if ((status == 0)); then
         return 0
-      elif ((status == 2)) || [[ $err == *"manifest unknown"* ]]; then
+      elif ((status == 2)); then
         return 2
       fi
       echo "$err" >&2
@@ -55,7 +55,8 @@ writeShellApplication {
     registry=${lib.escapeShellArg registry}
     binaries=(${lib.escapeShellArgs binaries})
 
-    # Check every image first, so a refusal leaves no tag half moved.
+    # Check every image first, so a refusal leaves no tag half moved. A copy
+    # that fails partway does; a re-run finishes it.
     for binary in "''${binaries[@]}"; do
       image=$registry/$binary
       status=0

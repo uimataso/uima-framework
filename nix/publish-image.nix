@@ -31,12 +31,13 @@ writeShellApplication {
       exit 1
     fi
 
+    registry=${lib.escapeShellArg registry}
     ${lib.concatStrings (
       lib.mapAttrsToList (binary: image: ''
         # skopeo reads a compressed archive from a pipe; an uncompressed one
         # needs a file it can seek in.
         ${image} | gzip --fast |
-          skopeo copy docker-archive:/dev/stdin "docker://${registry}/${binary}:$sha"
+          skopeo copy docker-archive:/dev/stdin "docker://$registry/${binary}:$sha"
       '') images
     )}
   '';

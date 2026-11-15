@@ -82,25 +82,32 @@ Each project's workflow runs on its own CI host, in three stages:
 
 1. **Every push**: `nix develop -c just ci`, so the gate is defined once, in the `justfile`.
 2. **Main**: publish the images under the build sha, then move the project's moving tag, such as
-   `latest`, only while the commit is still main's tip, so a slow run can't move it back. Then the
-   project's own deploy steps, if any.
+   `latest`, only while the commit is still main's tip, so a slow run can't move it back. A run
+   that fails leaves the tag on the last commit that passed, and a re-run of main's tip moves it.
+   Then the project's own deploy steps, if any.
 3. **A release tag** (`v1.2.3`): tag the images main already published for that commit as `1.2.3`,
    without rebuilding them, so production runs the image dev ran. A release already on another
-   image is refused.
+   image is refused, and so is a pre-release tag. Push the tag once main's run has published the
+   commit; a tag pushed earlier fails, and a re-run tags it.
 
 - **Publishing** goes through the flake's apps, so CI and a local run push the same way. Each app
   does one operation; which branch publishes and which tags move is the workflow's to decide:
 
-  | App                                         | Does                                                              |
-  | ------------------------------------------- | ----------------------------------------------------------------- |
-  | `publish-image`                             | Pushes each image under the build sha.                            |
-  | `tag-image [--no-overwrite] <sha> <tag>...` | Tags each image's build sha with the tags.                        |
-  | `build-sha`                                 | Prints the build sha.                                             |
-  | `release-version <tag>`                     | Prints the version a release tag names: `v1.2.3` gives `1.2.3`.   |
-  | `is-tip <branch> <sha>`                     | Exits 0 at the branch's tip on `origin`, 1 behind it, 2 on error. |
+  | App                                         | Does                                                                          |
+  | ------------------------------------------- | ----------------------------------------------------------------------------- |
+  | `publish-image`                             | Pushes each image under the build sha.                                        |
+  | `tag-image [--no-overwrite] <sha> <tag>...` | Tags each image's build sha; `--no-overwrite` refuses a tag on another image. |
+  | `build-sha`                                 | Prints the build sha.                                                         |
+  | `release-version <tag>`                     | Prints the version a release tag names: `v1.2.3` gives `1.2.3`.               |
+  | `is-tip <branch> <sha>`                     | Prints `true` at the branch's tip on `origin`, `false` elsewhere.             |
 
-- **Publish job**: logs in to the registry, has an `origin` it can read, and runs one at a time per
-  branch.
+- **Publish jobs** run only for main and release tags, and only they get the registry's
+  credentials, through a secret scoped to those refs. They log in to the registry and have an
+  `origin` they can read.
+- **One at a time**: the job that moves a tag, from `is-tip` to `tag-image`, or the release's
+  `tag-image`, runs one at a time per ref, through the host's `concurrency` (Forgejo 14 or later).
+  Publishing is a job of its own, outside it: a host may drop a queued run, and every commit on main
+  still needs its images.
 - **Actions** (GitHub) are pinned to a commit sha, with the version in a comment.
 - **Triggers**: `push` and `workflow_dispatch`. Every job has a timeout.
 - **Nix cache**: the store is kept between runs, by `cache-nix-action` on GitHub and by a volume on
