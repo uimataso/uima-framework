@@ -12,6 +12,8 @@ writeShellApplication {
   name = "tag-image";
   runtimeInputs = [ skopeo ];
   meta.description = "Tag the images published under a build sha";
+  # The checks' ranges, such as [0-9a-f], match ASCII only.
+  runtimeEnv.LC_ALL = "C";
   text = ''
     # skopeo checks images against a signature policy; there is none to
     # check here, as the images are this project's own.

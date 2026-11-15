@@ -16,6 +16,8 @@ writeShellApplication {
     gzip
   ];
   meta.description = "Publish this build's images under its sha";
+  # The checks' ranges, such as [0-9a-f], match ASCII only.
+  runtimeEnv.LC_ALL = "C";
   text = ''
     # skopeo checks images against a signature policy; there is none to
     # check here, as the images come from this build.

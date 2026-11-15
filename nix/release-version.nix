@@ -4,6 +4,8 @@
 writeShellApplication {
   name = "release-version";
   meta.description = "Print the version a release tag names";
+  # The checks' ranges, such as [0-9a-f], match ASCII only.
+  runtimeEnv.LC_ALL = "C";
   text = ''
     if (($# != 1)); then
       echo "usage: release-version <tag>" >&2

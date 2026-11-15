@@ -82,13 +82,14 @@ Each project's workflow runs on its own CI host, in three stages:
 
 1. **Every push**: `nix develop -c just ci`, so the gate is defined once, in the `justfile`.
 2. **Main**: publish the images under the build sha, then move the project's moving tag, such as
-   `latest`, only while the commit is still main's tip, so a slow run can't move it back. A run
-   that fails leaves the tag on the last commit that passed, and a re-run of main's tip moves it.
+   `latest`, only while the commit is still main's tip, so a slow run can't move it back. The tag
+   stays where it is until a run of main's tip passes, so a failed tip holds it on an older commit.
    Then the project's own deploy steps, if any.
 3. **A release tag** (`v1.2.3`): tag the images main already published for that commit as `1.2.3`,
    without rebuilding them, so production runs the image dev ran. A release already on another
    image is refused, and so is a pre-release tag. Push the tag once main's run has published the
-   commit; a tag pushed earlier fails, and a re-run tags it.
+   commit, and while the registry still keeps that image; a tag pushed earlier fails, and a re-run
+   tags it. Only maintainers can push release tags, through the host's tag protection.
 
 - **Publishing** goes through the flake's apps, so CI and a local run push the same way. Each app
   does one operation; which branch publishes and which tags move is the workflow's to decide:
@@ -101,13 +102,16 @@ Each project's workflow runs on its own CI host, in three stages:
   | `release-version <tag>`                     | Prints the version a release tag names: `v1.2.3` gives `1.2.3`.               |
   | `is-tip <branch> <sha>`                     | Prints `true` at the branch's tip on `origin`, `false` elsewhere.             |
 
-- **Publish jobs** run only for main and release tags, and only they get the registry's
-  credentials, through a secret scoped to those refs. They log in to the registry and have an
+- **Publish jobs** run only for main and release tags. They log in to the registry and have an
   `origin` they can read.
+- **Registry credentials**: on GitHub, an environment that only main and release tags may deploy
+  to holds them. Forgejo can't scope a secret to refs, so anyone who can push can read it; only
+  maintainers get push access there.
 - **One at a time**: the job that moves a tag, from `is-tip` to `tag-image`, or the release's
-  `tag-image`, runs one at a time per ref, through the host's `concurrency` (Forgejo 14 or later).
+  `tag-image`, runs one at a time per ref, through the host's `concurrency`.
   Publishing is a job of its own, outside it: a host may drop a queued run, and every commit on main
-  still needs its images.
+  still needs its images. A tag job that fails between images leaves the tag on mixed images until
+  a later run moves it.
 - **Actions** (GitHub) are pinned to a commit sha, with the version in a comment.
 - **Triggers**: `push` and `workflow_dispatch`. Every job has a timeout.
 - **Nix cache**: the store is kept between runs, by `cache-nix-action` on GitHub and by a volume on

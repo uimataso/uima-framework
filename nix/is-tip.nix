@@ -9,6 +9,8 @@ writeShellApplication {
   name = "is-tip";
   runtimeInputs = [ git ];
   meta.description = "Check a sha is the tip of a branch on origin";
+  # The checks' ranges, such as [0-9a-f], match ASCII only.
+  runtimeEnv.LC_ALL = "C";
   text = ''
     if (($# != 2)); then
       echo "usage: is-tip <branch> <sha>" >&2

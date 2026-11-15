@@ -264,6 +264,19 @@ in
             ];
           }
         }
+        publish_odd=${
+          appFor ./publish-image.nix {
+            buildSha = sha;
+            registry = "registry.test/o;wner";
+            images.a = pkgs.writeShellScript "stream-a" "echo image-a";
+          }
+        }
+        tag_odd=${
+          appFor ./tag-image.nix {
+            registry = "registry.test/o;wner";
+            binaries = [ "a" ];
+          }
+        }
         version=${appFor ./release-version.nix { }}
         is_tip=${appFor ./is-tip.nix { }}
         reg=registry.test/owner
@@ -297,6 +310,7 @@ in
         printf '%s\n' "$reg/a:${sha} sha256:a" "$reg/b:${sha} sha256:b" > "$STUB_REGISTRY"
         long=$(printf 'a%.0s' {1..128})
         expect 0 $tag ${sha} latest "$long" x Latest
+        [[ $(grep -c '^copy' "$STUB_LOG") == 8 ]] || fail "copied more than the tags"
         for image in a b; do
           logged "copy docker://$reg/$image:${sha} docker://$reg/$image:latest"
           logged "copy docker://$reg/$image:${sha} docker://$reg/$image:x"
@@ -345,6 +359,15 @@ in
         echo "$reg/a:${sha} sha256:a" > "$STUB_REGISTRY"
         expect 1 $tag ${sha} latest
         no_copy
+        grep -qF "$reg/b:${sha} is missing" err || fail "the missing build isn't named"
+
+        # The registry reaches skopeo as written, even with shell characters.
+        odd='registry.test/o;wner'
+        echo "$odd/a:${sha} sha256:a" > "$STUB_REGISTRY"
+        expect 0 $publish_odd
+        logged "copy docker-archive:/dev/stdin docker://$odd/a:${sha}"
+        expect 0 $tag_odd ${sha} latest
+        logged "copy docker://$odd/a:${sha} docker://$odd/a:latest"
 
         # release-version reads a release tag's version.
         for ref in v1.2.3 refs/tags/v1.2.3; do
