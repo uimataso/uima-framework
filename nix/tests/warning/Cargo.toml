@@ -1,0 +1,9 @@
+# A crate with a clippy warning in its tests, so the clippy check must fail.
+[package]
+name = "warning"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+# Not part of the framework's workspace.
+[workspace]

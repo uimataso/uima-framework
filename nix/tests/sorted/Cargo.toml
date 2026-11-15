@@ -1,0 +1,16 @@
+# Sorted, in two groups and with a multi-line array as taplo formats it, so
+# the formatting check must pass.
+[package]
+name = "sorted"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+b = "1"
+c = { version = "1", features = [
+  "first-long-feature",
+  "second-long-feature",
+  "third-long-feature",
+] }
+
+a = "1"

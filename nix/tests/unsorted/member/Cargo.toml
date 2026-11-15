@@ -1,0 +1,9 @@
+# A member cargo-sort would reorder, so the formatting check must fail.
+[package]
+name = "unsorted"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+b = "1"
+a = "1"

@@ -218,7 +218,10 @@ let
             # An `images` key that isn't a binary fails here, not when the
             # container starts.
             buildCommand = ''
-              test -x ${package}/bin/${binary}
+              if ! test -x ${package}/bin/${binary}; then
+                echo "no binary ${binary} in ${package}" >&2
+                exit 1
+              fi
             ''
             + old.buildCommand;
           });

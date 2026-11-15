@@ -14,9 +14,13 @@ test-nix:
     #!/usr/bin/env bash
     set -euo pipefail
     checks=".#checks.$(nix eval --impure --raw --expr builtins.currentSystem)"
-    nix eval --raw "$checks" --apply 'cs: toString (builtins.filter
-      (n: builtins.match "test-.*" n != null) (builtins.attrNames cs))' \
-      | tr ' ' '\n' | sed "s|^|$checks.|" | xargs --no-run-if-empty nix build --no-link
+    names=$(nix eval --raw "$checks" --apply 'cs: toString (builtins.filter
+      (n: builtins.match "test-.*" n != null) (builtins.attrNames cs))')
+    if [[ -z $names ]]; then
+        echo "no test-* checks in $checks" >&2
+        exit 1
+    fi
+    tr ' ' '\n' <<< "$names" | sed "s|^|$checks.|" | xargs nix build --no-link
 
 # format every file (rust, toml, markdown, nix, yaml; see treefmt.nix)
 fmt:

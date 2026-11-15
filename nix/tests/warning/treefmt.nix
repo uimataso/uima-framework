@@ -1,0 +1,4 @@
+{ ... }:
+{
+  projectRootFile = "Cargo.toml";
+}

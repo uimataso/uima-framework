@@ -15,18 +15,22 @@ in
   config = lib.mkIf cfg.enable {
     # cargo-sort takes crate directories, not files, so the wrapper passes
     # each file's directory. `--grouped` sorts within each
-    # blank-line-separated block and keeps the blocks.
+    # blank-line-separated block and keeps the blocks; `--no-format` leaves
+    # the formatting to taplo.
     settings.formatter.cargo-sort = {
       command = pkgs.writeShellApplication {
         name = "cargo-sort-files";
         runtimeInputs = [ pkgs.cargo-sort ];
         text = ''
           for file in "$@"; do
-            cargo-sort --grouped "$(dirname "$file")"
+            cargo-sort --grouped --no-format "$(dirname "$file")"
           done
         '';
       };
-      includes = [ "Cargo.toml" ];
+      includes = [
+        "Cargo.toml"
+        "*/Cargo.toml"
+      ];
       priority = 0;
     };
 

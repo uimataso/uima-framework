@@ -109,36 +109,60 @@ let
     };
   };
 
-  # Stand-ins for skopeo and git that log their arguments. The registry is
-  # a file of `<ref> <digest>` lines; a ref in $STUB_BROKEN fails as an
-  # unreachable registry would. A missing ref fails with exit 1, the status
-  # a registry most often gives.
+  # Stand-ins for skopeo and git that log their arguments, and fail on
+  # arguments the apps must not pass, noting why in $STUB_BAD, since an app
+  # may turn the failure into its own. The registry is a file of
+  # `<ref> <digest>` lines; a ref in $STUB_BROKEN fails as an unreachable
+  # registry would. A missing ref fails as skopeo does, with exit 2 and
+  # "manifest unknown"; $STUB_MISSING_STATUS and $STUB_MISSING_ERR change
+  # either, as some registries do.
   stubSkopeo = pkgs.writeShellScriptBin "skopeo" ''
-    [[ $1 == --insecure-policy ]] && shift
+    if [[ $1 != --insecure-policy ]]; then
+      echo "skopeo without --insecure-policy" >> "$STUB_BAD"
+      exit 3
+    fi
+    shift
     echo "$*" >> "$STUB_LOG"
+    ref=''${*: -1}
+    ref=''${ref#docker://}
+    if [[ $ref == "''${STUB_BROKEN:-}" ]]; then
+      echo "unauthorized: authentication required" >&2
+      exit 1
+    fi
     case $1 in
-      copy) cat > /dev/null ;;
-      inspect)
-        ref=''${*: -1}
-        ref=''${ref#docker://}
-        if [[ $ref == "''${STUB_BROKEN:-}" ]]; then
-          echo "unauthorized: authentication required" >&2
-          exit 1
+      copy)
+        if [[ $2 == docker-archive:/dev/stdin ]] && ! gzip -t; then
+          echo "the archive isn't gzip" >> "$STUB_BAD"
+          exit 3
         fi
+        ;;
+      inspect)
         if ! line=$(grep "^$ref " "$STUB_REGISTRY"); then
-          echo "manifest unknown: manifest unknown" >&2
-          exit 1
+          echo "''${STUB_MISSING_ERR-manifest unknown: manifest unknown}" >&2
+          exit "''${STUB_MISSING_STATUS:-2}"
         fi
         echo "''${line#* }"
         ;;
     esac
   '';
   stubGit = pkgs.writeShellScriptBin "git" ''
+    if [[ "$*" != "ls-remote origin refs/heads/main" ]]; then
+      echo "unexpected git $*" >> "$STUB_BAD"
+      exit 3
+    fi
     # Like git, nothing when origin has no main.
     if [[ -n $STUB_TIP ]]; then
       printf '%s\trefs/heads/main\n' "$STUB_TIP"
     fi
   '';
+  # The build of `drv` fails, with `text` in its log.
+  failsWith =
+    text: drv:
+    pkgs.runCommand "fails-with" { } ''
+      grep -qF ${lib.escapeShellArg text} ${pkgs.testers.testBuildFailure drv}/testBuildFailure.log
+      touch $out
+    '';
+
   scriptFor =
     file: buildSha:
     lib.getExe (
@@ -184,7 +208,7 @@ in
         jq -e '.config.Entrypoint == ["${service.packages.fixture}/bin/fixture"]' $config
         jq -e '.config.ExposedPorts == {"8080/tcp": {}}' $config
         jq -e '.config.Env | index("FOO=bar") and index("RUST_LOG=info")' $config
-        jq -e '.config.Env | any(startswith("SSL_CERT_FILE=${pkgs.cacert}/"))' $config
+        jq -e '.config.Env | index("SSL_CERT_FILE=${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt")' $config
         jq -e '.config.Labels == {
           "org.opencontainers.image.revision": "${sha}",
           "org.opencontainers.image.source": "https://example.test/fixture"
@@ -197,6 +221,7 @@ in
         grep -q '^l.* \./etc/ssl/certs/ca-bundle\.crt -> ${pkgs.cacert}/' files
         grep -q '^l.* \./bin/hello -> ${pkgs.hello}/' files
         [[ $(tar -xOf $root ./etc/passwd) == 'app:x:65532:65532::/tmp:/sbin/nologin' ]]
+        [[ $(tar -xOf $root ./etc/group) == 'app:x:65532:' ]]
 
         # The apps push this build, to the registry without its trailing
         # slash.
@@ -212,6 +237,7 @@ in
     pkgs.runCommand "test-apps"
       {
         STUB_LOG = "log";
+        STUB_BAD = "bad";
         STUB_REGISTRY = "registry";
       }
       ''
@@ -227,7 +253,9 @@ in
           local want=$1 got=0
           shift
           : > "$STUB_LOG"
+          : > "$STUB_BAD"
           "$@" 2>/dev/null || got=$?
+          [[ ! -s $STUB_BAD ]] || fail "$*: $(cat "$STUB_BAD")"
           [[ $got == "$want" ]] || fail "$* exited $got, want $want"
         }
         logged() { grep -qxF "$1" "$STUB_LOG" || fail "not run: $1"; }
@@ -238,20 +266,32 @@ in
         logged "copy docker-archive:/dev/stdin docker://$reg/b:${sha}"
 
         export STUB_TIP=${rev}
-        expect 0 $publish latest
-        logged "copy docker://$reg/a:${sha} docker://$reg/a:latest"
-        logged "copy docker://$reg/b:${sha} docker://$reg/b:latest"
+        expect 0 $publish edge
+        logged "copy docker://$reg/a:${sha} docker://$reg/a:edge"
+        logged "copy docker://$reg/b:${sha} docker://$reg/b:edge"
+
+        # A tag may hold a version, as long as it isn't one.
+        expect 0 $publish edge-1.2.3
+        logged "copy docker://$reg/a:${sha} docker://$reg/a:edge-1.2.3"
+
+        # The longest tag a registry takes.
+        long=$(printf 'a%.0s' {1..128})
+        expect 0 $publish "$long"
+        logged "copy docker://$reg/a:${sha} docker://$reg/a:$long"
 
         export STUB_TIP=ffffffffffffffffffffffffffffffffffffffff
-        expect 0 $publish latest
-        ! grep -q ':latest' "$STUB_LOG" || fail "moved latest after main moved on"
+        expect 0 $publish edge
+        ! grep -q ':edge' "$STUB_LOG" || fail "moved edge after main moved on"
 
         export STUB_TIP=
-        expect 1 $publish latest
-        ! grep -q ':latest' "$STUB_LOG" || fail "moved latest with no main"
+        expect 1 $publish edge
+        ! grep -q ':edge' "$STUB_LOG" || fail "moved edge with no main"
+
+        # A broken push fails the app.
+        STUB_BROKEN=$reg/a:${sha} expect 1 $publish
 
         # Not a tag, or the tag of a build or a release.
-        for bad in a/b .x ${sha} 1.2.3; do
+        for bad in a/b .x "a$long" ${sha} 1.2.3; do
           expect 1 $publish "$bad"
           no_copy
         done
@@ -267,6 +307,8 @@ in
           expect 1 $tag "$bad"
           no_copy
         done
+        # A dirty build is refused even when the registry has it.
+        printf '%s\n' "$reg/a:${sha}-dirty sha256:a" "$reg/b:${sha}-dirty sha256:b" >> "$STUB_REGISTRY"
         expect 1 $tag_dirty 1.2.3
         no_copy
 
@@ -277,13 +319,25 @@ in
         expect 1 $tag 1.2.3
         no_copy
 
+        # A missing release is told apart by its status or its message.
+        STUB_MISSING_ERR= expect 0 $tag 1.2.4
+        logged "copy docker://$reg/b:${sha} docker://$reg/b:1.2.4"
+        STUB_MISSING_STATUS=1 expect 0 $tag 1.2.5
+        logged "copy docker://$reg/b:${sha} docker://$reg/b:1.2.5"
+
         # A release that can't be looked up is refused, not overwritten.
-        STUB_BROKEN=$reg/b:1.2.4 expect 1 $tag 1.2.4
+        STUB_BROKEN=$reg/b:1.2.6 expect 1 $tag 1.2.6
+        no_copy
+        STUB_MISSING_STATUS=1 STUB_MISSING_ERR=denied expect 1 $tag 1.2.6
+        no_copy
+
+        # So is a build that can't be looked up.
+        STUB_BROKEN=$reg/b:${sha} expect 1 $tag 1.2.6
         no_copy
 
         # A missing build is refused before anything is tagged.
         echo "$reg/a:${sha} sha256:a" > "$STUB_REGISTRY"
-        expect 1 $tag 1.2.4
+        expect 1 $tag 1.2.6
         no_copy
 
         touch $out
@@ -291,18 +345,40 @@ in
 
   # An `images` key that isn't a binary fails the image build.
   test-missing-binary =
-    pkgs.testers.testBuildFailure
+    failsWith "no binary nope"
       (serviceWith {
         images.nope = { };
       }).packages.nope-image;
 
-  # The cargo-sort program sorts: an unsorted Cargo.toml fails the check.
+  # The cargo-sort program sorts, nested Cargo.toml files too: an unsorted
+  # member fails the check.
   test-cargo-sort =
-    pkgs.testers.testBuildFailure
+    failsWith "member/Cargo.toml"
       (uimaLib.mkRustProject {
         self.outPath = ./tests/unsorted;
         inherit (pkgs.stdenv.hostPlatform) system;
         name = "unsorted";
         root = ./tests/unsorted;
       }).checks.formatting;
+
+  # cargo-sort and taplo leave a sorted Cargo.toml as it is: groups stay
+  # apart, and arrays keep taplo's indent.
+  test-cargo-sort-sorted =
+    (uimaLib.mkRustProject {
+      self.outPath = ./tests/sorted;
+      inherit (pkgs.stdenv.hostPlatform) system;
+      name = "sorted";
+      root = ./tests/sorted;
+    }).checks.formatting;
+
+  # Clippy denies warnings, in the tests too: a crate with one fails the
+  # check.
+  test-clippy =
+    failsWith "len_zero"
+      (uimaLib.mkRustProject {
+        self.outPath = ./tests/warning;
+        inherit (pkgs.stdenv.hostPlatform) system;
+        name = "warning";
+        root = ./tests/warning;
+      }).checks.clippy;
 }
