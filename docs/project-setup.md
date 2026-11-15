@@ -50,7 +50,7 @@ The flake functions build with [crane].
 - **Sources**: the Rust sources and Cargo files. Add any other file the build or a test reads, such
   as `migrations/` for `sqlx::migrate!` or a fixture under `include_str!`, through `extraSrc`.
 - **Packages** are named, with no `packages.default`: `packages.<project>` holds every binary of
-  the workspace, built once. A single-binary project sets `meta.mainProgram`, so
+  the workspace, built once. A single-binary project passes `mainProgram`, so
   `nix run .#<project>` runs it.
 - **Build sha**: the build sets `BUILD_SHA` to the commit's first 12 hex digits, with `-dirty`
   added for uncommitted changes. The image tag uses the same 12 digits, so the binary, what it
