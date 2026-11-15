@@ -67,6 +67,7 @@ let
       expected = [
         "build-sha"
         "is-tip"
+        "move-tag"
         "publish-image"
         "release-version"
         "tag-image"
@@ -146,10 +147,12 @@ let
         ;;
     esac
   '';
-  # git's origin has main at $STUB_TIP, or no main when it's empty, and
-  # always a branch whose name ends in main; $STUB_GIT_FAIL fails it.
+  # git's origin has main, or the branch in $STUB_BRANCH, at $STUB_TIP, or
+  # no such branch when it's empty, and always a branch whose name ends in
+  # main; $STUB_GIT_FAIL fails it.
   stubGit = pkgs.writeShellScriptBin "git" ''
-    if [[ "$*" != "ls-remote origin refs/heads/main" ]]; then
+    branch=''${STUB_BRANCH:-main}
+    if [[ "$*" != "ls-remote origin refs/heads/$branch" ]]; then
       echo "unexpected git $*" >> "$STUB_BAD"
       exit 3
     fi
@@ -159,7 +162,7 @@ let
     fi
     printf '%s\trefs/heads/old/main\n' ffffffffffffffffffffffffffffffffffffffff
     if [[ -n ''${STUB_TIP:-} ]]; then
-      printf '%s\trefs/heads/main\n' "$STUB_TIP"
+      printf '%s\trefs/heads/%s\n' "$STUB_TIP" "$branch"
     fi
   '';
   # The build of `drv` fails, with `text` in its log.
@@ -171,17 +174,14 @@ let
     '';
 
   # The app from `file`, called with `args`, on the stubs.
-  appFor =
-    file: args:
-    lib.getExe (
-      lib.callPackageWith (
-        pkgs
-        // {
-          skopeo = stubSkopeo;
-          git = stubGit;
-        }
-      ) file args
-    );
+  appDrv = lib.callPackageWith (
+    pkgs
+    // {
+      skopeo = stubSkopeo;
+      git = stubGit;
+    }
+  );
+  appFor = file: args: lib.getExe (appDrv file args);
   publishFor =
     buildSha:
     appFor ./publish-image.nix {
@@ -241,6 +241,11 @@ in
         done
         grep -qE "^binaries=\('?fixture'?\)$" ${service.apps.tag-image.program}
         [[ $(${service.apps.build-sha.program}) == ${sha} ]]
+        # move-tag moves this build with the service's is-tip and tag-image.
+        move=${service.apps.move-tag.program}
+        grep -q "^sha=${sha}$" $move
+        grep -qF ${service.apps.is-tip.program} $move
+        grep -qF ${service.apps.tag-image.program} $move
         touch $out
       '';
 
@@ -248,6 +253,10 @@ in
   test-apps =
     pkgs.runCommand "test-apps"
       {
+        # A UTF-8 locale, where a range such as [A-Z] can match more than
+        # ASCII unless an app sets its own.
+        LOCALE_ARCHIVE = "${pkgs.glibcLocales}/lib/locale/locale-archive";
+        LANG = "en_US.UTF-8";
         STUB_LOG = "log";
         STUB_BAD = "bad";
         STUB_REGISTRY = "registry";
@@ -275,6 +284,19 @@ in
           appFor ./tag-image.nix {
             registry = "registry.test/o;wner";
             binaries = [ "a" ];
+          }
+        }
+        move=${
+          appFor ./move-tag.nix {
+            buildSha = sha;
+            isTip = appDrv ./is-tip.nix { };
+            tagImage = appDrv ./tag-image.nix {
+              registry = "registry.test/owner";
+              binaries = [
+                "a"
+                "b"
+              ];
+            };
           }
         }
         version=${appFor ./release-version.nix { }}
@@ -327,7 +349,7 @@ in
           expect 1 $tag "$bad" latest
           no_copy
         done
-        for bad in a/b .x -x "a$long"; do
+        for bad in a/b a:b .x -x "a$long"; do
           expect 1 $tag ${sha} latest "$bad"
           no_copy
         done
@@ -396,6 +418,65 @@ in
         expect 1 $is_tip main ${sha} extra
         STUB_GIT_FAIL=1 expect 1 $is_tip main ${sha}
         STUB_TIP= expect 1 $is_tip main ffffffffffff
+
+        # move-tag tags this build at the branch's tip, and only with the
+        # tags given; leaves the tags when the branch has moved on, and
+        # fails when it can't tell or a tag is bad, tip or not.
+        printf '%s\n' "$reg/a:${sha} sha256:a" "$reg/b:${sha} sha256:b" > "$STUB_REGISTRY"
+        copies() { [[ $(grep -c '^copy' "$STUB_LOG") == "$1" ]] || fail "copied other than $1 times"; }
+        expect 0 $move main latest edge
+        copies 4
+        for image in a b; do
+          logged "copy docker://$reg/$image:${sha} docker://$reg/$image:latest"
+          logged "copy docker://$reg/$image:${sha} docker://$reg/$image:edge"
+        done
+        # A tag already on an older image moves.
+        printf '%s\n' "$reg/a:latest sha256:old" "$reg/b:latest sha256:old" >> "$STUB_REGISTRY"
+        expect 0 $move main latest
+        copies 2
+        logged "copy docker://$reg/a:${sha} docker://$reg/a:latest"
+        logged "copy docker://$reg/b:${sha} docker://$reg/b:latest"
+        STUB_BRANCH=release expect 0 $move release latest
+        copies 2
+        moved=ffffffffffffffffffffffffffffffffffffffff
+        STUB_TIP=$moved expect 0 $move main latest
+        no_copy
+        grep -q "main has moved on" out || fail "move-tag doesn't say main moved on"
+        STUB_GIT_FAIL=1 expect 1 $move main latest
+        STUB_TIP= expect 1 $move main latest
+        for tip in ${rev} $moved; do
+          STUB_TIP=$tip expect 1 $move main
+          grep -q usage err || fail "no usage at $tip"
+          for bad in --no-overwrite -x "bad tag" "" a:b é; do
+            STUB_TIP=$tip expect 1 $move main latest "$bad"
+            no_copy
+          done
+        done
+        # A build that isn't a commit's isn't moved to.
+        for move_build in ${
+          lib.concatMapStringsSep " "
+            (
+              buildSha:
+              appFor ./move-tag.nix {
+                inherit buildSha;
+                isTip = appDrv ./is-tip.nix { };
+                tagImage = appDrv ./tag-image.nix {
+                  registry = "registry.test/owner";
+                  binaries = [ "a" ];
+                };
+              }
+            )
+            [
+              "${sha}-dirty"
+              "dev"
+            ]
+        }; do
+          expect 1 $move_build main latest
+          no_copy
+        done
+        # A failing tag-image fails it.
+        : > "$STUB_REGISTRY"
+        expect 1 $move main latest
 
         touch $out
       '';

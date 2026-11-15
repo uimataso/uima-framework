@@ -101,6 +101,7 @@ Each project's workflow runs on its own CI host, in three stages:
   | `build-sha`                                 | Prints the build sha.                                                         |
   | `release-version <tag>`                     | Prints the version a release tag names: `v1.2.3` gives `1.2.3`.               |
   | `is-tip <branch> <sha>`                     | Prints `true` at the branch's tip on `origin`, `false` elsewhere.             |
+  | `move-tag <branch> <tag>...`                | Tags the build sha while it is the branch's tip, and leaves the tags if not.  |
 
 - **Forgejo jobs** run in a `nixos/nix` container, which has no node for actions/checkout; this
   repo's [`actions/`](../actions) check out and log in to the registry with shell steps instead.
@@ -109,11 +110,11 @@ Each project's workflow runs on its own CI host, in three stages:
 - **Registry credentials**: on GitHub, an environment that only main and release tags may deploy
   to holds them. Forgejo can't scope a secret to refs, so anyone who can push can read it; only
   maintainers get push access there.
-- **One at a time**: the job that moves a tag, from `is-tip` to `tag-image`, or the release's
-  `tag-image`, runs one at a time per ref, through the host's `concurrency`.
-  Publishing is a job of its own, outside it: a host may drop a queued run, and every commit on main
-  still needs its images. A tag job that fails between images leaves the tag on mixed images until
-  a later run moves it.
+- **One at a time**: the jobs that tag images, with `move-tag` or the release's `tag-image`, share
+  one `concurrency` group, so they run one at a time. A host may drop a queued run; a tag job's
+  drop leaves the tag where it was until a later run moves it, and so does a tag job that fails
+  between images. Publishing is a job of its own, outside the group, since every commit on main
+  still needs its images.
 - **Actions** (GitHub) are pinned to a commit sha, with the version in a comment.
 - **Triggers**: `push` and `workflow_dispatch`. Every job has a timeout.
 - **Nix cache**: the store is kept between runs, by `cache-nix-action` on GitHub and by a volume on

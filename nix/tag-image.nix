@@ -8,8 +8,13 @@
   registry,
   binaries,
 }:
+let
+  # The registry's tag grammar.
+  tagPattern = "^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$";
+in
 writeShellApplication {
   name = "tag-image";
+  passthru = { inherit tagPattern; };
   runtimeInputs = [ skopeo ];
   meta.description = "Tag the images published under a build sha";
   # The checks' ranges, such as [0-9a-f], match ASCII only.
@@ -48,7 +53,7 @@ writeShellApplication {
       exit 1
     fi
     for tag in "$@"; do
-      if ! [[ $tag =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$ ]]; then
+      if ! [[ $tag =~ ${tagPattern} ]]; then
         echo "tag-image: not a tag: $tag" >&2
         exit 1
       fi

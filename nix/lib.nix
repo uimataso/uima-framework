@@ -230,17 +230,24 @@ let
         binary: config: lib.nameValuePair "${binary}-image" (imageOf binary config)
       ) images;
 
-      # An app from nix/<app>.nix, called with `args`.
+      # The script from nix/<app>.nix, called with `args`.
+      scriptOf = app: args: pkgs.callPackage ./${app}.nix args;
+      # That script as an app.
       appOf =
         app: args:
         let
-          script = pkgs.callPackage ./${app}.nix args;
+          script = scriptOf app args;
         in
         {
           type = "app";
           program = lib.getExe script;
           inherit (script) meta;
         };
+
+      tagImageArgs = {
+        registry = registry';
+        binaries = lib.attrNames images;
+      };
 
       # dockerTools images are Linux-only.
       isLinux = pkgs.stdenv.hostPlatform.isLinux;
@@ -263,13 +270,15 @@ let
           registry = registry';
           images = lib.mapAttrs (binary: _: imagePackages."${binary}-image") images;
         };
-        tag-image = appOf "tag-image" {
-          registry = registry';
-          binaries = lib.attrNames images;
-        };
+        tag-image = appOf "tag-image" tagImageArgs;
         build-sha = appOf "build-sha" { inherit buildSha; };
         release-version = appOf "release-version" { };
         is-tip = appOf "is-tip" { };
+        move-tag = appOf "move-tag" {
+          inherit buildSha;
+          isTip = scriptOf "is-tip" { };
+          tagImage = scriptOf "tag-image" tagImageArgs;
+        };
       };
     };
 in
