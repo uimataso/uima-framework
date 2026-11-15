@@ -57,7 +57,8 @@ The flake functions build with [crane].
   reports and the image name one commit the same way.
   The app's `main` reads it with `option_env!("BUILD_SHA")`, falling back to `"dev"` in a plain
   `cargo build`, and hands it to whatever reports it. A framework crate doesn't read it itself,
-  since its value would be fixed when the dependencies are built.
+  since its value would be fixed when the dependencies are built. A healthcheck that
+  `wait-for-build` polls reports it as the JSON field `sha`.
 - **TLS** is rustls, not OpenSSL, so neither the build nor the image needs a system library.
 - **C libraries** a crate finds through pkg-config go in `nativeLibs`; the build, the dev shell and
   the image then use the nix one. A library not listed isn't found, so a `-sys` crate that can
@@ -97,14 +98,15 @@ Each project's workflow runs on its own CI host, in three stages:
 - **Publishing** goes through the flake's apps, so CI and a local run push the same way. Each app
   does one operation; which branch publishes and which tags move is the workflow's to decide:
 
-  | App                                         | Does                                                                          |
-  | ------------------------------------------- | ----------------------------------------------------------------------------- |
-  | `publish-image`                             | Pushes each image under the build sha.                                        |
-  | `tag-image [--no-overwrite] <sha> <tag>...` | Tags each image's build sha; `--no-overwrite` refuses a tag on another image. |
-  | `build-sha`                                 | Prints the build sha.                                                         |
-  | `release-version <tag>`                     | Prints the version a release tag names: `v1.2.3` gives `1.2.3`.               |
-  | `is-tip <branch> <sha>`                     | Prints `true` at the branch's tip on `origin`, `false` elsewhere.             |
-  | `move-tag <branch> <tag>...`                | Tags the build sha while it is the branch's tip, and leaves the tags if not.  |
+  | App                                             | Does                                                                                                |
+  | ----------------------------------------------- | --------------------------------------------------------------------------------------------------- |
+  | `publish-image`                                 | Pushes each image under the build sha.                                                              |
+  | `tag-image [--no-overwrite] <sha> <tag>...`     | Tags each image's build sha; `--no-overwrite` refuses a tag on another image.                       |
+  | `build-sha`                                     | Prints the build sha.                                                                               |
+  | `release-version <tag>`                         | Prints the version a release tag names: `v1.2.3` gives `1.2.3`.                                     |
+  | `is-tip <branch> <sha>`                         | Prints `true` at the branch's tip on `origin`, `false` elsewhere.                                   |
+  | `move-tag <branch> <tag>...`                    | Tags the build sha while it is the branch's tip, and leaves the tags if not.                        |
+  | `wait-for-build [--timeout <s>] <branch> <url>` | Waits until `<url>` serves the build sha while it is the branch's tip, and fails after the timeout. |
 
 - **Forgejo jobs** run in a `nixos/nix` container, which has no node for actions/checkout; this
   repo's [`actions/`](../actions) check out and log in to the registry with shell steps instead.

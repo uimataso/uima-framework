@@ -361,6 +361,10 @@ let
             isTip = scriptOf "is-tip" { };
             tagImage = scriptOf "tag-image" tagImageArgs;
           };
+          wait-for-build = appOf "wait-for-build" {
+            inherit buildSha;
+            isTip = scriptOf "is-tip" { };
+          };
         };
     };
 in

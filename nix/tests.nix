@@ -82,6 +82,7 @@ let
         "publish-image"
         "release-version"
         "tag-image"
+        "wait-for-build"
       ];
     };
     testAppPrograms = {
@@ -223,9 +224,26 @@ let
       exit 128
     fi
     printf '%s\trefs/heads/old/main\n' ffffffffffffffffffffffffffffffffffffffff
+    # From the second call on, the tip is $STUB_TIP_AFTER, when set.
+    if [[ -n ''${STUB_TIP_AFTER:-} ]]; then
+      if [[ -e $STUB_LOG.git ]]; then
+        STUB_TIP=$STUB_TIP_AFTER
+      fi
+      touch "$STUB_LOG.git"
+    fi
     if [[ -n ''${STUB_TIP:-} ]]; then
       printf '%s\trefs/heads/%s\n' "$STUB_TIP" "$branch"
     fi
+  '';
+  # A stand-in for curl that logs its URL and answers with $STUB_BODY, or
+  # fails as an unreachable host does when that is unset.
+  stubCurl = pkgs.writeShellScriptBin "curl" ''
+    echo "curl $*" >> "$STUB_LOG"
+    if [[ -z ''${STUB_BODY:-} ]]; then
+      echo "curl: (7) Failed to connect" >&2
+      exit 7
+    fi
+    echo "$STUB_BODY"
   '';
   # The build of `drv` fails, with `text` in its log.
   failsWith =
@@ -241,6 +259,7 @@ let
     // {
       skopeo = stubSkopeo;
       git = stubGit;
+      curl = stubCurl;
     }
   );
   appFor = file: args: lib.getExe (appDrv file args);
@@ -308,6 +327,10 @@ in
         grep -q "^sha=${sha}$" $move
         grep -qF ${service.apps.is-tip.program} $move
         grep -qF ${service.apps.tag-image.program} $move
+        # wait-for-build waits for this build, with the service's is-tip.
+        wait=${service.apps.wait-for-build.program}
+        grep -q "^sha=${sha}$" $wait
+        grep -qF ${service.apps.is-tip.program} $wait
         touch $out
       '';
 
@@ -363,6 +386,12 @@ in
         }
         version=${appFor ./release-version.nix { }}
         is_tip=${appFor ./is-tip.nix { }}
+        wait=${
+          appFor ./wait-for-build.nix {
+            buildSha = sha;
+            isTip = appDrv ./is-tip.nix { };
+          }
+        }
         reg=registry.test/owner
 
         fail() { echo "FAIL: $*"; cat "$STUB_LOG"; exit 1; }
@@ -539,6 +568,36 @@ in
         # A failing tag-image fails it.
         : > "$STUB_REGISTRY"
         expect 1 $move main latest
+
+        # wait-for-build waits at the branch's tip until the URL serves this
+        # build, fails when the timeout passes first, and has nothing to
+        # wait for once the branch has moved on.
+        url=https://dev.test/healthcheck
+        STUB_BODY='{"status":"healthy","sha":"${sha}"}' expect 0 $wait main $url
+        logged "curl -sSfL --max-time 10 -- $url"
+        STUB_BODY='{"sha":"${sha}"}' expect 0 $wait --timeout 0 main $url
+        STUB_BODY='{"sha":"ffffffffffff"}' expect 1 $wait --timeout 0 main $url
+        grep -q "still serves ffffffffffff after 0s, not ${sha}" err || fail "wait-for-build doesn't name what is served"
+        STUB_BODY= expect 1 $wait --timeout 0 main $url
+        grep -q "still serves nothing" err || fail "wait-for-build doesn't say nothing is served"
+        STUB_BODY='not json' expect 1 $wait --timeout 0 main $url
+        STUB_BODY='{"status":"healthy"}' expect 1 $wait --timeout 0 main $url
+        grep -q "still serves nothing" err || fail "wait-for-build takes a missing sha for one"
+        # No poll waits past the timeout.
+        logged "curl -sSfL --max-time 1 -- $url"
+        # A branch that moves on during the wait leaves it to the newer run.
+        rm -f "$STUB_LOG.git"
+        STUB_TIP=${rev} STUB_TIP_AFTER=$moved STUB_BODY='{"sha":"ffffffffffff"}' expect 0 $wait --timeout 0 main $url
+        grep -q "main has moved on" out || fail "wait-for-build fails after main moved on"
+        rm -f "$STUB_LOG.git"
+        STUB_TIP=$moved STUB_BODY='{"sha":"ffffffffffff"}' expect 0 $wait main $url
+        grep -q "main has moved on" out || fail "wait-for-build doesn't say main moved on"
+        ! grep -q '^curl' "$STUB_LOG" || fail "wait-for-build waited after main moved on"
+        STUB_GIT_FAIL=1 expect 1 $wait main $url
+        for args in "" "main" "main $url extra" "--timeout main $url" "--timeout x main $url" "--timeout -1 main $url" "--timeout 1000000 main $url"; do
+          # shellcheck disable=SC2086
+          expect 1 $wait $args
+        done
 
         touch $out
       '';
