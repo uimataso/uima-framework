@@ -1,0 +1,28 @@
+{
+  "nodes": {
+    "root": {
+      "inputs": {
+        "uima": "uima",
+        "a-dep": "a-dep"
+      }
+    },
+    "uima": {
+      "locked": {
+        "owner": "uimataso",
+        "repo": "uima-framework",
+        "rev": "1111111111111111111111111111111111111111",
+        "type": "github"
+      }
+    },
+    "a-dep": {
+      "locked": {
+        "owner": "attacker",
+        "repo": "uima-framework",
+        "rev": "4444444444444444444444444444444444444444",
+        "type": "github"
+      }
+    }
+  },
+  "root": "root",
+  "version": 7
+}

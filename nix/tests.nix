@@ -33,6 +33,17 @@ let
     );
   service = serviceWith { };
 
+  # A project whose flake.lock pins the framework, with workflows that use
+  # its actions.
+  actionsProject =
+    fixture:
+    uimaLib.mkRustProject {
+      self.outPath = ./tests/actions-${fixture};
+      inherit (pkgs.stdenv.hostPlatform) system;
+      name = "actions";
+      root = ./tests/actions-${fixture};
+    };
+
   # The parts evaluate as the docs say.
   failures = lib.runTests {
     testEachSystem = {
@@ -111,6 +122,51 @@ let
         map lib.getName
           (serviceWith { nativeLibs = pkgs: [ pkgs.xz ]; }).packages.fixture.buildInputs;
       expected = [ "xz" ];
+    };
+    testSyncActionsApp = {
+      expr = lib.attrNames (actionsProject "pinned").apps;
+      expected = [ "sync-actions" ];
+    };
+    # A framework input that isn't locked from github, such as a local
+    # override, or that follows another input's, has no rev to pin to.
+    testPathLockNoActions = {
+      expr =
+        map
+          (fixture: [
+            ((actionsProject fixture).checks ? actions)
+            ((actionsProject fixture).apps ? sync-actions)
+          ])
+          [
+            "path"
+            "follows"
+          ];
+      expected = [
+        [
+          false
+          false
+        ]
+        [
+          false
+          false
+        ]
+      ];
+    };
+    # A rev or owner that isn't one refuses to evaluate, before it reaches
+    # the script.
+    testBadRev = {
+      expr = (builtins.tryEval (actionsProject "badrev").apps.sync-actions.program).success;
+      expected = false;
+    };
+    # A project that doesn't lock the framework has neither.
+    testNoLockNoActions = {
+      expr = [
+        (service.checks ? actions)
+        (service.apps ? sync-actions)
+      ];
+      expected = [
+        false
+        false
+      ];
     };
     testAppsHaveDescriptions = {
       expr = lib.filterAttrs (_: app: !(app.meta ? description)) service.apps;
@@ -540,4 +596,66 @@ in
         ! pkg-config --exists zlib
         touch $out
       '';
+
+  # The actions check passes when every framework action is at the locked
+  # rev, and names each one that isn't.
+  test-actions-pinned = (actionsProject "pinned").checks.actions;
+  test-actions-stale = failsWith "checkout@3333333333333333333333333333333333333333" (actionsProject "stale")
+  .checks.actions;
+  test-actions-stale-branch = failsWith "registry-login@main" (actionsProject "stale").checks.actions;
+  # One stale ref fails its line, even next to a pinned one.
+  test-actions-stale-beside = failsWith "b@5555555555555555555555555555555555555555" (actionsProject "stale")
+  .checks.actions;
+  # Another owner's or host's actions fail, whatever their ref.
+  test-actions-foreign-owner = failsWith "attacker/uima-framework" (actionsProject "foreign")
+  .checks.actions;
+  test-actions-foreign-host = failsWith "evil.example" (actionsProject "foreign").checks.actions;
+  test-actions-foreign-repo = failsWith "not-uima-framework" (actionsProject "foreign")
+  .checks.actions;
+
+  # sync-actions pins every framework action to the locked rev, whatever
+  # its ref, and leaves other actions alone.
+  test-sync-actions =
+    let
+      sync = (actionsProject "stale").apps.sync-actions.program;
+    in
+    pkgs.runCommand "test-sync-actions" { } ''
+      cp -r ${./tests/actions-stale}/. .
+      chmod -R u+w .
+      ${sync}
+      grep -q 'registry-login@1111111111111111111111111111111111111111 # a comment' .github/workflows/ci.yaml
+      grep -qF 'checkout@1111111111111111111111111111111111111111, with: {}}' .forgejo/workflows/main.yml
+      grep -q 'checkout@1111111111111111111111111111111111111111$' .forgejo/workflows/main.yml
+      ${sync} --check
+      grep -q 'actions/cache@2222222222222222222222222222222222222222' .github/workflows/ci.yaml
+      test "$(grep -o 'actions/[a-z-]*@1111111111111111111111111111111111111111' .forgejo/workflows/main.yml | wc -l)" = 6
+      # A workflows directory that is a link fails the check, also where
+      # the link leads nowhere, as in the check's copy of the repo.
+      mv .forgejo/workflows .forgejo/real
+      ln -s /nonexistent .forgejo/workflows
+      if ${sync} --check 2>/dev/null; then
+        echo "sync-actions --check passed with a linked workflows directory" >&2
+        exit 1
+      fi
+      rm .forgejo/workflows
+      mv .forgejo/real .forgejo/workflows
+      # A workflow behind a link, or one it can't read, fails the check.
+      ln -s /nonexistent .github/workflows/dangling.yaml
+      if ${sync} --check 2>/dev/null; then
+        echo "sync-actions --check passed with a link" >&2
+        exit 1
+      fi
+      rm .github/workflows/dangling.yaml
+      touch .github/workflows/unreadable.yaml
+      chmod 000 .github/workflows/unreadable.yaml
+      if ${sync} --check 2>/dev/null; then
+        echo "sync-actions --check passed with an unreadable workflow" >&2
+        exit 1
+      fi
+      if ${sync} extra 2>/dev/null; then
+        echo "sync-actions took an argument" >&2
+        exit 1
+      fi
+      touch $out
+    '';
 }

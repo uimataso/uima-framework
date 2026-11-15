@@ -1,0 +1,6 @@
+jobs:
+  ci:
+    steps:
+      - uses: uimataso/uima-framework/actions/checkout@1111111111111111111111111111111111111111
+      - uses: uimataso/uima-framework/actions/registry-login@1111111111111111111111111111111111111111 # a comment
+      - uses: actions/cache@2222222222222222222222222222222222222222

@@ -1,0 +1,8 @@
+jobs:
+  ci:
+    steps:
+      - uses: attacker/uima-framework/actions/registry-login@1111111111111111111111111111111111111111
+      - uses: https://evil.example/uimataso/uima-framework/actions/checkout@1111111111111111111111111111111111111111
+      - uses: someone/not-uima-framework/actions/checkout@1111111111111111111111111111111111111111
+      - uses: uimataso/Uima-Framework/actions/checkout@1111111111111111111111111111111111111111
+      - uses: https://e.x/a:1:uimataso/uima-framework/actions/checkout@1111111111111111111111111111111111111111

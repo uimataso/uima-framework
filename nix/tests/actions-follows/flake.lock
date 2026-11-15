@@ -1,0 +1,9 @@
+{
+  "nodes": {
+    "root": { "inputs": { "other": "other", "uima": ["other", "uima"] } },
+    "other": { "inputs": { "uima": "uima" }, "locked": { "owner": "o", "repo": "other", "rev": "2222222222222222222222222222222222222222", "type": "github" } },
+    "uima": { "locked": { "owner": "uimataso", "repo": "uima-framework", "rev": "1111111111111111111111111111111111111111", "type": "github" } }
+  },
+  "root": "root",
+  "version": 7
+}

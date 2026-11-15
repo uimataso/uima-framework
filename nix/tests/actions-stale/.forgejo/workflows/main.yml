@@ -1,0 +1,8 @@
+jobs:
+  ci:
+    steps:
+      - uses: https://github.com/uimataso/uima-framework/actions/checkout@3333333333333333333333333333333333333333
+      - uses: https://github.com/uimataso/uima-framework/actions/registry-login@main
+      - run: echo uimataso/uima-framework/actions/b@5555555555555555555555555555555555555555 uimataso/uima-framework/actions/a@1111111111111111111111111111111111111111
+      - uses: uimataso/uima-framework/actions/checkout@refs/heads/main
+      - {uses: uimataso/uima-framework/actions/checkout@old, with: {}}

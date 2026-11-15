@@ -1,0 +1,8 @@
+{
+  "nodes": {
+    "root": { "inputs": { "uima": "uima" } },
+    "uima": { "locked": { "path": "/somewhere/uima-framework", "type": "path" } }
+  },
+  "root": "root",
+  "version": 7
+}

@@ -1,0 +1,4 @@
+jobs:
+  ci:
+    steps:
+      - uses: https://github.com/uimataso/uima-framework/actions/checkout@1111111111111111111111111111111111111111

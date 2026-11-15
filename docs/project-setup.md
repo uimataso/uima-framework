@@ -108,6 +108,9 @@ Each project's workflow runs on its own CI host, in three stages:
 
 - **Forgejo jobs** run in a `nixos/nix` container, which has no node for actions/checkout; this
   repo's [`actions/`](../actions) check out and log in to the registry with shell steps instead.
+- **Framework actions** are pinned to the rev `flake.lock` locks the framework at; the `actions`
+  check fails on any other. After `nix flake update uima`, `nix run .#sync-actions` pins them
+  again.
 - **Publish jobs** run only for main and release tags. They log in to the registry and have an
   `origin` they can read.
 - **Registry credentials**: on GitHub, an environment that only main and release tags may deploy

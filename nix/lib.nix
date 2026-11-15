@@ -71,6 +71,50 @@ let
       cargoArtifacts = craneLib.buildDepsOnly (
         common // { cargoCheckExtraArgs = "--workspace --all-targets --all-features"; }
       );
+
+      # The node flake.lock locks the `uima` input at, and the framework's
+      # owner and rev when it is locked from github; a local override has no
+      # rev to pin the actions to.
+      lock = root + "/flake.lock";
+      frameworkNode =
+        let
+          nodes = (lib.importJSON lock).nodes;
+          input = nodes.root.inputs.uima or null;
+        in
+        if !lib.pathExists lock then
+          null
+        else if lib.isList input then
+          # `follows` another input's.
+          { locked = { }; }
+        else if input != null then
+          nodes.${input}
+        else
+          null;
+      framework =
+        let
+          inherit (frameworkNode.locked) owner rev;
+        in
+        if frameworkNode != null && frameworkNode.locked.type or null == "github" then
+          # Both go into the script's patterns.
+          assert lib.assertMsg (
+            builtins.match "[A-Za-z0-9-]+" owner != null
+          ) "flake.lock: uima's owner isn't one: ${owner}";
+          assert lib.assertMsg (
+            builtins.match "[0-9a-f]{40}" rev != null
+          ) "flake.lock: uima's rev isn't one: ${rev}";
+          {
+            inherit owner rev;
+          }
+        else
+          null;
+      syncActions = pkgs.callPackage ./sync-actions.nix { inherit (framework) owner rev; };
+      workflows = lib.fileset.toSource {
+        inherit root;
+        fileset = lib.fileset.unions [
+          (lib.fileset.maybeMissing (root + "/.github/workflows"))
+          (lib.fileset.maybeMissing (root + "/.forgejo/workflows"))
+        ];
+      };
     in
     {
       inherit
@@ -83,17 +127,39 @@ let
 
       formatter = treefmt.config.build.wrapper;
 
-      checks = {
-        formatting = treefmt.config.build.check self;
-
-        clippy = craneLib.cargoClippy (
-          common
-          // {
-            inherit cargoArtifacts;
-            cargoClippyExtraArgs = "--workspace --all-targets --all-features -- -D warnings";
-          }
-        );
+      apps = lib.optionalAttrs (framework != null) {
+        sync-actions = {
+          type = "app";
+          program = lib.getExe syncActions;
+          inherit (syncActions) meta;
+        };
       };
+
+      checks =
+        lib.warnIf (frameworkNode != null && framework == null)
+          "flake.lock doesn't lock uima from github itself, so the actions check is skipped"
+          (
+            lib.optionalAttrs (framework != null) {
+              # The workflows use the framework's actions at the rev the
+              # flake locks.
+              actions = pkgs.runCommand "actions" { } ''
+                cd ${workflows}
+                ${lib.getExe syncActions} --check
+                touch $out
+              '';
+            }
+          )
+        // {
+          formatting = treefmt.config.build.check self;
+
+          clippy = craneLib.cargoClippy (
+            common
+            // {
+              inherit cargoArtifacts;
+              cargoClippyExtraArgs = "--workspace --all-targets --all-features -- -D warnings";
+            }
+          );
+        };
 
       devShell = pkgs.mkShell {
         packages = [
@@ -129,7 +195,12 @@ let
       parts = projectParts args;
     in
     {
-      inherit (parts) formatter checks devShell;
+      inherit (parts)
+        formatter
+        apps
+        checks
+        devShell
+        ;
     };
 
   # Turns `f system` into flake outputs: `{ packages = ...; }` for each
@@ -273,22 +344,24 @@ let
         ${name} = package;
       };
 
-      apps = lib.optionalAttrs (isLinux && registry != null && images != { }) {
-        publish-image = appOf "publish-image" {
-          inherit buildSha;
-          registry = registry';
-          images = lib.mapAttrs (binary: _: imagePackages."${binary}-image") images;
+      apps =
+        project.apps
+        // lib.optionalAttrs (isLinux && registry != null && images != { }) {
+          publish-image = appOf "publish-image" {
+            inherit buildSha;
+            registry = registry';
+            images = lib.mapAttrs (binary: _: imagePackages."${binary}-image") images;
+          };
+          tag-image = appOf "tag-image" tagImageArgs;
+          build-sha = appOf "build-sha" { inherit buildSha; };
+          release-version = appOf "release-version" { };
+          is-tip = appOf "is-tip" { };
+          move-tag = appOf "move-tag" {
+            inherit buildSha;
+            isTip = scriptOf "is-tip" { };
+            tagImage = scriptOf "tag-image" tagImageArgs;
+          };
         };
-        tag-image = appOf "tag-image" tagImageArgs;
-        build-sha = appOf "build-sha" { inherit buildSha; };
-        release-version = appOf "release-version" { };
-        is-tip = appOf "is-tip" { };
-        move-tag = appOf "move-tag" {
-          inherit buildSha;
-          isTip = scriptOf "is-tip" { };
-          tagImage = scriptOf "tag-image" tagImageArgs;
-        };
-      };
     };
 in
 {
