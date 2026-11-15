@@ -55,7 +55,7 @@ The flake functions build with [crane].
 - **Build sha**: the build sets `BUILD_SHA` to the commit's first 12 hex digits, with `-dirty`
   added for uncommitted changes. The image tag uses the same 12 digits, so the binary, what it
   reports and the image name one commit the same way.
-  The app's `main` reads it with `option_env!("BUILD_SHA")`, falling back to `"dev"` in a plain
+  The app's `main` reads it with `option_env!("BUILD_SHA")`, falling back to `"unknown"` in a plain
   `cargo build`, and hands it to whatever reports it. A framework crate doesn't read it itself,
   since its value would be fixed when the dependencies are built. A healthcheck that
   `wait-for-build` polls reports it as the JSON field `sha`.
@@ -124,9 +124,11 @@ Each project's workflow runs on its own CI host, in three stages:
   between images. Publishing is a job of its own, outside the group, since every commit on main
   still needs its images.
 - **Actions** (GitHub) are pinned to a commit sha, with the version in a comment.
-- **Triggers**: `push` and `workflow_dispatch`. Every job has a timeout.
-- **Nix cache**: the store is kept between runs, by `cache-nix-action` on GitHub and by a volume on
-  the Forgejo runner.
+- **Triggers**: `push` and `workflow_dispatch`. Main's run skips a push that changes no file the
+  images are built from, such as docs, through `paths-ignore`. Every job has a timeout.
+- **Nix cache**: the gate's store is kept between runs, by `cache-nix-action` on GitHub and by a
+  volume on the Forgejo runner. A deploy job that only runs the apps skips it: their scripts come
+  from cache.nixos.org faster than the store restores.
 - **Cargo cache**: the tests compile outside the store, so cargo's downloads and `target/` are
   cached too. The downloads may restore from an older `Cargo.lock`; `target/` only from the same
   `Cargo.lock` and `rust-toolchain.toml`, so stale builds don't pile up.
