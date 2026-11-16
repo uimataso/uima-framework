@@ -91,6 +91,8 @@ fn time_left(now: Timestamp, issued_at: Timestamp, ttl: Duration) -> Duration {
 }
 ```
 
+- The current time comes from a `Clock` in the context, through `HasClock`, never
+  `Timestamp::now()`, so a test can control it.
 - A timestamp plus or minus a `Duration` is jiff's own. The `Duration` between two timestamps
   comes from `TimestampExt`, so `SignedDuration` stays out of app code.
 - Name a length for what it is, `token_ttl: Duration`, not `token_ttl_secs: u64`. Turn it into a

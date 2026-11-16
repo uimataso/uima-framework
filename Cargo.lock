@@ -936,6 +936,7 @@ dependencies = [
  "jiff",
  "serde",
  "serde_json",
+ "uima-port-macro",
  "uima-testing",
 ]
 
