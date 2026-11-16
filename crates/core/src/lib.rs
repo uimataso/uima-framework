@@ -26,8 +26,13 @@
 //! the type implements. With serde, use `try_from` and `into` with the type the macro
 //! converts from, as in the example.
 //!
-//! Don't derive `Default`, or `Deserialize` without `try_from`: both make a value the checks
-//! never saw.
+//! Don't derive `Default`, or `Deserialize` without `try_from`, since both make a value the
+//! checks never saw.
+//!
+//! # Secrets
+//!
+//! [`Secret`] wraps a value that must stay out of logs, such as a URL holding a password. For a
+//! secret string with rules, [`secret!`] defines a newtype instead.
 //!
 //! # Lists
 //!
@@ -40,6 +45,7 @@ mod invalid;
 mod number;
 mod page;
 mod port_error;
+mod secret;
 mod sort;
 mod text;
 mod uid;
@@ -50,6 +56,7 @@ pub use invalid::{Invalid, Newtype};
 pub use number::NumberErrorKind;
 pub use page::{CountedPage, OffsetPage, OffsetQuery, PageErrorKind, PageRule};
 pub use port_error::{Failure, FailureKind, PortError, PortResult};
+pub use secret::Secret;
 pub use sort::{Sort, SortOrder};
 pub use text::{SecretErrorKind, TextErrorKind};
 pub use uid::UidErrorKind;
