@@ -18,7 +18,8 @@ sowah, nova-el, techo and genkan.
   only. Never copy files from them; reuse their test cases as the spec for the rewrite.
 - **Common things only.** No app-specific error variants, table names, routes or metric prefixes;
   take them as parameters or leave them in the app.
-- **Extract what is already duplicated.** A crate needs two services that will use it.
+- **Extract what services share.** A crate holds what more than one service needs, today or
+  once migrated.
 
 ## Checks
 
