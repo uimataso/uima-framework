@@ -171,6 +171,7 @@ async fn migrate_template(url: &PostgresUrl, migrator: &Migrator) {
     template.pool().close().await;
 }
 
+/// The connection to `database` on the server at `url`.
 fn connection(url: &PostgresUrl, database: &str) -> PostgresConnection {
     PostgresConnection {
         url: url.clone(),

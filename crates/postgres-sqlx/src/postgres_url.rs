@@ -5,6 +5,7 @@ use std::str::FromStr;
 
 use sqlx::ConnectOptions as _;
 use sqlx::postgres::PgConnectOptions;
+
 use uima_core::{Invalid, Newtype, Secret};
 
 use crate::DatabaseName;
@@ -140,7 +141,8 @@ pub enum PostgresUrlErrorKind {
     /// `dbname`, which would override the URL or hide a password from the mask. It leaves the key
     /// out, since a password with an unencoded `?` reads as a query.
     QueryKey,
-    /// A fragment, which no connection reads.
+    /// A fragment, which a password with an unencoded `#` turns into, where the mask doesn't
+    /// reach it.
     Fragment,
     /// A query key set twice, where sqlx would take the last value, though a reader of the URL
     /// may take the first.
@@ -154,12 +156,10 @@ impl fmt::Display for PostgresUrlErrorKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Malformed(reason) => write!(f, "isn't a URL: {reason}"),
-            Self::Scheme(scheme) => {
-                write!(
-                    f,
-                    "can't have the scheme '{scheme}', only postgres or postgresql"
-                )
-            }
+            Self::Scheme(scheme) => write!(
+                f,
+                "can't have the scheme '{scheme}', only postgres or postgresql"
+            ),
             Self::HasDatabase => write!(f, "can't name a database"),
             Self::NoHost => write!(f, "needs a host"),
             Self::QueryKey => write!(

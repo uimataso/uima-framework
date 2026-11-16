@@ -9,7 +9,7 @@
 //! use uima_postgres_sqlx::{Postgres, PostgresConfig, PostgresConnection};
 //!
 //! # static MIGRATOR: Migrator = Migrator::DEFAULT;
-//! // static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./migrations");
+//! // static MIGRATOR: Migrator = sqlx::migrate!("./migrations");
 //!
 //! let env = Env::from_process();
 //! let connection = PostgresConnection::from_env(&env, "POSTGRES", "app")?;
@@ -81,7 +81,9 @@ impl Postgres {
             .connect_options(database)
             .with_context(|| format!("invalid postgres url {url}"))?;
 
-        create_database_if_missing(connection, &options, config.acquire_timeout).await?;
+        if !database_exists(connection, &options, config.acquire_timeout).await? {
+            create_database(connection, &options, config.acquire_timeout).await?;
+        }
 
         let pool = PgPoolOptions::new()
             .max_connections(config.max_connections.get())
@@ -139,34 +141,42 @@ impl fmt::Debug for Postgres {
     }
 }
 
-/// Creates `connection`'s database when it doesn't exist.
-///
-/// It tries the database first, so a user that can't reach the `postgres` maintenance database,
-/// as on some hosted servers, works when its database already exists.
-async fn create_database_if_missing(
+/// Whether `connection`'s database exists, found by connecting to it, so a user that can't reach
+/// the `postgres` maintenance database, as on some hosted servers, works when its database
+/// already exists.
+async fn database_exists(
     connection: &PostgresConnection,
     options: &PgConnectOptions,
     timeout: Duration,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<bool> {
     /// SQLSTATE `invalid_catalog_name`, for a database that doesn't exist.
     const MISSING_DATABASE: &str = "3D000";
-    /// SQLSTATEs for a database another instance created first, `duplicate_database`, or
-    /// `unique_violation` when both instances got past Postgres' own check.
-    const CREATED_ELSEWHERE: [&str; 2] = ["42P04", "23505"];
 
     let PostgresConnection { url, database } = connection;
     match connect_within(options, timeout).await {
         Ok(probe) => {
             let _ = probe.close().await;
-            return Ok(());
+            Ok(true)
         }
-        Err(error) if has_sqlstate(&error, MISSING_DATABASE) => {}
+        Err(error) if has_sqlstate(&error, MISSING_DATABASE) => Ok(false),
         Err(error) => {
-            return Err(error)
-                .with_context(|| format!("failed to connect to database {database} on {url}"));
+            Err(error).with_context(|| format!("failed to connect to database {database} on {url}"))
         }
     }
+}
 
+/// Creates `connection`'s database from the `postgres` maintenance database, taking one another
+/// instance created first as created.
+async fn create_database(
+    connection: &PostgresConnection,
+    options: &PgConnectOptions,
+    timeout: Duration,
+) -> anyhow::Result<()> {
+    /// SQLSTATEs for a database another instance created first, `duplicate_database`, or
+    /// `unique_violation` when both instances got past Postgres' own check.
+    const CREATED_ELSEWHERE: [&str; 2] = ["42P04", "23505"];
+
+    let PostgresConnection { url, database } = connection;
     let created = async {
         let mut maintenance =
             connect_within(&options.clone().database("postgres"), timeout).await?;
@@ -179,17 +189,21 @@ async fn create_database_if_missing(
         created.map(|_| ())
     };
     match created.await {
-        Ok(()) => info!(%database, "created the database"),
+        Ok(()) => {
+            info!(%database, "created the database");
+            Ok(())
+        }
         Err(error)
             if CREATED_ELSEWHERE
                 .iter()
-                .any(|code| has_sqlstate(&error, code)) => {}
+                .any(|code| has_sqlstate(&error, code)) =>
+        {
+            Ok(())
+        }
         Err(error) => {
-            return Err(error)
-                .with_context(|| format!("failed to create database {database} on {url}"));
+            Err(error).with_context(|| format!("failed to create database {database} on {url}"))
         }
     }
-    Ok(())
 }
 
 /// One connection to `options`, given up after `timeout`.

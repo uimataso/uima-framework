@@ -11,6 +11,10 @@ use uima_time_jiff::{InvalidDuration, parse_duration};
 
 use crate::MaxConnections;
 
+/// The longest timeout, `i32::MAX` milliseconds, which Postgres takes for `lock_timeout`, and
+/// which keeps the pool's deadlines far from overflowing the clock.
+const MAX_TIMEOUT: Duration = Duration::from_millis(2_147_483_647);
+
 /// The pool's size and limits.
 #[derive(Debug, Clone)]
 pub struct PostgresConfig {
@@ -57,7 +61,7 @@ impl PostgresConfig {
     /// Checks each value against its field's doc, for a config built in code.
     pub(crate) fn validate(&self) -> anyhow::Result<()> {
         check_acquire_timeout(self.acquire_timeout).context("invalid acquire_timeout")?;
-        check_lock_timeout(self.lock_timeout).context("invalid lock_timeout")?;
+        check_max(self.lock_timeout).context("invalid lock_timeout")?;
         Ok(())
     }
 }
@@ -69,10 +73,10 @@ fn parse_acquire_timeout(s: &str) -> Result<Duration, InvalidTimeout> {
     Ok(timeout)
 }
 
-/// Reads a lock timeout and checks it with [`check_lock_timeout`].
+/// Reads a lock timeout and checks it with [`check_max`], since zero waits forever.
 fn parse_lock_timeout(s: &str) -> Result<Duration, InvalidTimeout> {
     let timeout = parse_duration(s).map_err(InvalidTimeout::Duration)?;
-    check_lock_timeout(timeout)?;
+    check_max(timeout)?;
     Ok(timeout)
 }
 
@@ -81,18 +85,12 @@ fn check_acquire_timeout(timeout: Duration) -> Result<(), InvalidTimeout> {
     if timeout.is_zero() {
         return Err(InvalidTimeout::Zero);
     }
-    check_limit(timeout)
+    check_max(timeout)
 }
 
-/// Checks a lock timeout, where zero waits forever.
-fn check_lock_timeout(timeout: Duration) -> Result<(), InvalidTimeout> {
-    check_limit(timeout)
-}
-
-/// Checks that `timeout` is at most `i32::MAX` milliseconds, which Postgres takes for
-/// `lock_timeout`, and which keeps the pool's deadlines far from overflowing the clock.
-fn check_limit(timeout: Duration) -> Result<(), InvalidTimeout> {
-    if whole_millis(timeout) > u128::from(i32::MAX.unsigned_abs()) {
+/// Checks that `timeout` is at most [`MAX_TIMEOUT`].
+fn check_max(timeout: Duration) -> Result<(), InvalidTimeout> {
+    if timeout > MAX_TIMEOUT {
         return Err(InvalidTimeout::TooLong);
     }
     Ok(())
@@ -116,7 +114,11 @@ impl fmt::Display for InvalidTimeout {
         match self {
             Self::Duration(error) => error.fmt(f),
             Self::Zero => write!(f, "must be longer than zero"),
-            Self::TooLong => write!(f, "is longer than the limit of 2147483647ms"),
+            Self::TooLong => write!(
+                f,
+                "is longer than the limit of {}ms",
+                MAX_TIMEOUT.as_millis()
+            ),
         }
     }
 }
