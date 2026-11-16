@@ -1,8 +1,6 @@
-//! Time for every app, on jiff.
+//! Timestamps, lengths of time and a clock for every app, on jiff.
 //!
-//! A point in time is a [`jiff::Timestamp`] and a length of time is a [`std::time::Duration`].
-//! A timestamp plus or minus a `Duration` is jiff's own; [`TimestampExt`] gives the `Duration`
-//! between two timestamps.
+//! # Examples
 //!
 //! ```
 //! use std::time::Duration;
@@ -15,6 +13,14 @@
 //! assert_eq!(now.saturating_duration_since(joined), Duration::from_secs(90));
 //! assert_eq!(joined.checked_duration_since(now), None);
 //! ```
+//!
+//! # Timestamps and durations
+//!
+//! A point in time is a [`jiff::Timestamp`] and a length of time is a [`std::time::Duration`].
+//! A timestamp plus or minus a `Duration` is jiff's own; [`TimestampExt`] gives the `Duration`
+//! between two timestamps.
+//!
+//! # Clock
 //!
 //! The app reads the current time from a [`Clock`] in its context, so a test can set it with a
 //! `testing::SimulatedClock`.
@@ -36,9 +42,11 @@
 //! assert!(stamp(&Ctx { clock: SystemClock }) <= Timestamp::now());
 //! ```
 //!
-//! Features: `testing` adds the `testing` module. `serde` and `tzdb-bundle-always` turn on jiff's;
-//! `serde` also adds the `serde` module here, and `tzdb-bundle-always` is for an image without
-//! `/usr/share/zoneinfo`.
+//! # Features
+//!
+//! - `testing`: adds the `testing` module.
+//! - `serde`: turns on jiff's, and adds the `serde` module.
+//! - `tzdb-bundle-always`: turns on jiff's, for an image without `/usr/share/zoneinfo`.
 
 mod clock;
 mod duration;

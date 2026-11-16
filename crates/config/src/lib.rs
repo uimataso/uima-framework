@@ -1,5 +1,7 @@
 //! Reading a service's configuration from environment variables.
 //!
+//! # Examples
+//!
 //! ```
 //! use std::net::SocketAddr;
 //! use std::str::FromStr;

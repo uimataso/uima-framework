@@ -1,4 +1,8 @@
-//! Test helpers any crate can use: assertions, and [`run_case`] for a port's contract.
+//! Test helpers any crate can use.
+//!
+//! # Examples
+//!
+//! Assertions; see [`run_case`] for a port's contract.
 //!
 //! ```
 //! use uima_testing::{assert, check};

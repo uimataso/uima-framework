@@ -1,5 +1,8 @@
-//! A token for stopping work cooperatively: whoever holds a clone can cancel it, and every task
-//! watching it stops at its next check.
+//! A token for stopping work cooperatively.
+//!
+//! # Examples
+//!
+//! Whoever holds a clone can cancel it, and every task watching it stops at its next check.
 //!
 //! ```
 //! # async fn serve() {}

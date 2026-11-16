@@ -1,4 +1,6 @@
-//! Process-level plumbing for a service's `main`: stopping on a shutdown signal, and time limits.
+//! Process-level plumbing for a service's `main`, such as stopping on a shutdown signal.
+//!
+//! # Examples
 //!
 //! ```no_run
 //! # async fn serve(_: impl std::future::Future<Output = ()>) {}

@@ -1,5 +1,7 @@
 //! Serde helpers for config fields.
 //!
+//! # Examples
+//!
 //! ```
 //! use std::time::Duration;
 //!

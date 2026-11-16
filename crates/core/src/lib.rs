@@ -1,12 +1,8 @@
-//! Value types my services share: validating newtype macros, PATCH-style updates, and the
-//! port error.
+//! Value types my services share.
 //!
-//! # Newtypes
+//! # Examples
 //!
-//! [`uid!`], [`count!`], [`number!`], [`text!`] and [`secret!`] each define a newtype that holds
-//! only checked values. A type's errors are [`Invalid<Name>`](Invalid), and the attributes before
-//! its name, such as doc comments and derives, go on the struct. With serde, deserializing goes
-//! through the checks with `try_from`, and serializing writes the inner value with `into`:
+//! A validating newtype, read and written with serde:
 //!
 //! ```
 //! use serde::{Deserialize, Serialize};
@@ -23,9 +19,15 @@
 //! assert!(serde_json::from_str::<GroupName>(r#""""#).is_err());
 //! ```
 //!
-//! `uid!` types do the same with `"String"`, and `count!` and `number!` types with `"i64"`; see
-//! [`secret!`] for a secret. Don't derive `Default`, or `Deserialize` without `try_from`: both make
-//! a value the checks never saw.
+//! # Newtypes
+//!
+//! [`uid!`], [`count!`], [`number!`], [`text!`] and [`secret!`] each define a newtype that holds
+//! only checked values. A type's errors are [`Invalid<Name>`](Invalid), and the attributes before
+//! its name, such as doc comments and derives, go on the struct. With serde, deserializing goes
+//! through the checks with `try_from`, and serializing writes the inner value with `into`, as in
+//! the example. `uid!` types do the same with `"String"`, and `count!` and `number!` types with
+//! `"i64"`; see [`secret!`] for a secret. Don't derive `Default`, or `Deserialize` without
+//! `try_from`: both make a value the checks never saw.
 
 mod count;
 mod invalid;

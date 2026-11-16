@@ -1,12 +1,18 @@
 //! Installs the global `tracing` subscriber for a service.
 //!
+//! # Examples
+//!
 //! ```no_run
 //! uima_log_tracing::init("info");
 //! ```
 //!
+//! # Filter
+//!
 //! The filter comes from `RUST_LOG` (see the [directive syntax]). When it is unset, empty or
 //! invalid, the default filter given here is used; an invalid one is warned about once the
 //! subscriber is up.
+//!
+//! # Colors
 //!
 //! Logs go to stdout, colored when stdout is a terminal. The environment can override that:
 //!

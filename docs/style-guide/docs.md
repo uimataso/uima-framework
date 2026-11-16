@@ -19,6 +19,11 @@ first.
   types fit together. Examples run as doctests, so they stay correct.
 - Reread the doc before finishing and cut whatever the caller doesn't need.
 
+A crate's `lib.rs` doc follows the same idea: one short sentence of what the crate is for, then
+`# Examples` with its common use, a section for each topic the example doesn't show, and
+`# Features` listing what each feature adds.
+A public module's doc has the same shape, without `# Features`.
+
 ```rust
 impl Invitation {
     /// Uses up one redemption of the invitation.

@@ -1,8 +1,11 @@
-//! Dependency injection for ports: a context type says which adapter serves each port, and code
-//! generic over the context asks for the port by name.
+//! Dependency injection for ports.
 //!
-//! [`has_port`] on a port trait `UserRepo` adds the trait `HasUserRepo`, whose `user_repo()` gives
-//! the adapter. [`HasPort`] implements it for a context, from the field that serves the port.
+//! # Examples
+//!
+//! A context type says which adapter serves each port, and code generic over the context asks for
+//! the port by name. [`has_port`] on a port trait `UserRepo` adds the trait `HasUserRepo`, whose
+//! `user_repo()` gives the adapter. [`HasPort`] implements it for a context, from the field that
+//! serves the port.
 //!
 //! ```
 //! use std::future::Future;
