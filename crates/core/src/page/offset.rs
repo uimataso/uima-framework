@@ -41,7 +41,7 @@ pub struct OffsetPage<T> {
 }
 
 impl<T> OffsetPage<T> {
-    /// The page from rows read with `LIMIT query.fetch_limit()`: drops the extra row and sets
+    /// The page from rows read with `LIMIT query.fetch_limit()`. It drops the extra row and sets
     /// `has_more`.
     ///
     /// ```

@@ -23,7 +23,7 @@ grows:
   not after a submodule. Don't use sibling files named by topic (`<topic>_test.rs`) or `#[path]`.
 - `testing` that other crates use is behind the `testing` feature; `testing` used only by its own
   crate is behind `cfg(test)`.
-- `testing` and `contract` grow the same way as `tests`: inline first, then a file.
+- `testing` and `contract` grow the same way as `tests`, inline first, then a file.
 
 Assertions use `uima_testing::check!` and `uima_testing::assert!`, never `std::assert*!`, for their
 output. A pattern match is `assert!(let Ok(user) = result)`.
@@ -56,7 +56,7 @@ async fn saves_and_finds_a_user() {
   panics on failure like `start()`. If it clears a shared resource instead of creating a new one,
   say so in its doc, since the cases using it must then run one after another.
 - Fields are private; expose what tests need through methods such as `client()` and `url()`.
-- A composed harness holds the harnesses it starts: its `start()` starts theirs, and its `fresh()`
+- A composed harness holds the harnesses it starts. Its `start()` starts theirs, and its `fresh()`
   builds on theirs.
 
 ## Contract

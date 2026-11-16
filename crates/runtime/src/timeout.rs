@@ -5,8 +5,8 @@ use std::time::Duration;
 
 /// Puts a time limit on a future.
 pub trait TimeoutExt: Future + Sized {
-    /// Runs the future for at most `duration`: `Ok` with its output if it finishes in time,
-    /// otherwise `Err`, dropping the future. Same as [`tokio::time::timeout`].
+    /// Runs the future for at most `duration`, giving `Ok` with its output if it finishes in time,
+    /// otherwise `Err` after dropping the future. Same as [`tokio::time::timeout`].
     fn timeout(self, duration: Duration) -> tokio::time::Timeout<Self> {
         tokio::time::timeout(duration, self)
     }

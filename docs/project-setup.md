@@ -7,14 +7,14 @@ apply to a library, so its own files are the example for those.
 
 Every project's `justfile` has these recipes, and adds its own (such as `run`) beside them:
 
-| Recipe      | Runs                                                                                          |
-| ----------- | --------------------------------------------------------------------------------------------- |
-| `fmt`       | Formats every file.                                                                           |
-| `fmt-check` | Checks the formatting without changing files.                                                 |
-| `lint`      | The linters, warnings as errors.                                                              |
-| `check`     | `fmt-check` and `lint`.                                                                       |
-| `test`      | Every test the project has, Rust or not.                                                      |
-| `ci`        | The whole gate: `nix flake check`, then `test` with the CI test profile. CI runs this recipe. |
+| Recipe      | Runs                                                                                         |
+| ----------- | -------------------------------------------------------------------------------------------- |
+| `fmt`       | Formats every file.                                                                          |
+| `fmt-check` | Checks the formatting without changing files.                                                |
+| `lint`      | The linters, warnings as errors.                                                             |
+| `check`     | `fmt-check` and `lint`.                                                                      |
+| `test`      | Every test the project has, Rust or not.                                                     |
+| `ci`        | The whole gate, `nix flake check` then `test` with the CI test profile. CI runs this recipe. |
 
 `nix flake check` runs the same checks as `check`, and for a service also builds it; the Rust tests
 stay out of it (see [Tests](#tests)).
@@ -23,8 +23,8 @@ Before a commit, run `just check test`.
 ## Flake
 
 A project's `flake.nix` calls the framework's flake functions, in [`nix/lib.nix`](../nix/lib.nix),
-which list their parameters: `mkRustService` for a service, `mkRustProject` for a library. They
-return one system's parts, such as `checks` and `devShell`; the project places them with
+which list their parameters. `mkRustService` is for a service and `mkRustProject` for a library.
+They return one system's parts, such as `checks` and `devShell`; the project places them with
 `eachSystem`, so its own `flake.nix` shows what it outputs, and an extra check or app goes beside
 them with `//`. This repo's [`flake.nix`](../flake.nix) is the library example.
 
@@ -49,7 +49,7 @@ The flake functions build with [crane].
   so a change to the project's code doesn't rebuild them. Git dependencies need no hash.
 - **Sources**: the Rust sources and Cargo files. Add any other file the build or a test reads, such
   as `migrations/` for `sqlx::migrate!` or a fixture under `include_str!`, through `extraSrc`.
-- **Packages** are named, with no `packages.default`: `packages.<project>` holds every binary of
+- **Packages** are named, with no `packages.default`. `packages.<project>` holds every binary of
   the workspace, built once. A single-binary project passes `mainProgram`, so
   `nix run .#<project>` runs it.
 - **Build sha**: the build sets `BUILD_SHA` to the commit's first 12 hex digits, with `-dirty`
@@ -89,7 +89,7 @@ Each project's workflow runs on its own CI host, in three stages:
    `latest`, only while the commit is still main's tip, so a slow run can't move it back. The tag
    stays where it is until a run of main's tip passes, so a failed tip holds it on an older commit.
    Then the project's own deploy steps, if any.
-3. **A release tag** (`v1.2.3`): tag the images main already published for that commit as `1.2.3`,
+3. **A release tag** (`v1.2.3`) tags the images main already published for that commit as `1.2.3`,
    without rebuilding them, so production runs the image dev ran. A release already on another
    image is refused, and so is a pre-release tag. Push the tag once main's run has published the
    commit, and while the registry still keeps that image; a tag pushed earlier fails, and a re-run
@@ -103,7 +103,7 @@ Each project's workflow runs on its own CI host, in three stages:
   | `publish-image`                                 | Pushes each image under the build sha.                                                              |
   | `tag-image [--no-overwrite] <sha> <tag>...`     | Tags each image's build sha; `--no-overwrite` refuses a tag on another image.                       |
   | `build-sha`                                     | Prints the build sha.                                                                               |
-  | `release-version <tag>`                         | Prints the version a release tag names: `v1.2.3` gives `1.2.3`.                                     |
+  | `release-version <tag>`                         | Prints the version a release tag names, so `v1.2.3` gives `1.2.3`.                                  |
   | `is-tip <branch> <sha>`                         | Prints `true` at the branch's tip on `origin`, `false` elsewhere.                                   |
   | `move-tag <branch> <tag>...`                    | Tags the build sha while it is the branch's tip, and leaves the tags if not.                        |
   | `wait-for-build [--timeout <s>] <branch> <url>` | Waits until `<url>` serves the build sha while it is the branch's tip, and fails after the timeout. |
@@ -127,8 +127,8 @@ Each project's workflow runs on its own CI host, in three stages:
 - **Triggers**: `push` and `workflow_dispatch`. Main's run skips a push that changes no file the
   images are built from, such as docs, through `paths-ignore`. Every job has a timeout.
 - **Nix cache**: the gate's store is kept between runs, by `cache-nix-action` on GitHub and by a
-  volume on the Forgejo runner. A deploy job that only runs the apps skips it: their scripts come
-  from cache.nixos.org faster than the store restores.
+  volume on the Forgejo runner. A deploy job that only runs the apps skips it, since their scripts
+  come from cache.nixos.org faster than the store restores.
 - **Cargo cache**: the tests compile outside the store, so cargo's downloads and `target/` are
   cached too. The downloads may restore from an older `Cargo.lock`; `target/` only from the same
   `Cargo.lock` and `rust-toolchain.toml`, so stale builds don't pile up.
@@ -153,7 +153,7 @@ Every file in the repo is formatted, not only Rust, with [treefmt] through [tree
 - **`treefmt.nix`** at the repo root lists the formatters. Start from this repo's
   [`treefmt.nix`](../treefmt.nix) and add a formatter for each other kind of file the project has.
 - **rustfmt** comes from the toolchain `rust-toolchain.toml` pins, so the formatting doesn't change
-  with whichever rustfmt is on `PATH`. It runs with its defaults: no `rustfmt.toml`.
+  with whichever rustfmt is on `PATH`. It runs with its defaults, with no `rustfmt.toml`.
 - **The flake functions** turn `treefmt.nix` into the `formatter` (`nix fmt`), a `formatting`
   check, and a `treefmt` in the dev shell. They also add a `cargo-sort` program, which
   treefmt-nix doesn't have, for `treefmt.nix` to enable.

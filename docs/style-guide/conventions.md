@@ -2,7 +2,7 @@
 
 ## Declaration order
 
-Rust doesn't need forward declarations, so order a file top to bottom for the reader: constants
+Rust doesn't need forward declarations, so order a file top to bottom for the reader, with constants
 first, then public items before private ones, and high-level logic before the supporting types and
 functions it uses.
 
@@ -49,27 +49,28 @@ fn take_one_use(uses_left: &mut u32) -> Result<(), RedeemError> { ... }
 
 ## Newtypes
 
-Wrap a primitive in a newtype when the value has a meaning or a rule the primitive doesn't: an ID,
-a count that can't go negative, a name with a length limit. The compiler then catches a user ID
-passed where an invitation ID is expected, and a value that exists is a value that was checked.
+Wrap a primitive in a newtype when the value has a meaning or a rule the primitive doesn't, such as
+an ID, a count that can't go negative, or a name with a length limit. The compiler then catches a
+user ID passed where an invitation ID is expected, and a value that exists is a value that was
+checked.
 
 ```rust
 uima_core::text!(
-    /// An invitation code: `INVITE_CODE_LEN` characters from `INVITE_CODE_CHARS`.
+    /// An invitation code of `INVITE_CODE_LEN` characters from `INVITE_CODE_CHARS`.
     pub InviteCode,
     len = INVITE_CODE_LEN..=INVITE_CODE_LEN,
     chars = |c| c.is_ascii() && INVITE_CODE_CHARS.contains(&(c as u8)),
 );
 ```
 
-- Define it with a `uima-core` macro: `uid!` for an ID, `count!` for a count, `number!` for an
+- Define it with a `uima-core` macro, `uid!` for an ID, `count!` for a count, `number!` for an
   integer within a range, `text!` for a string, and `secret!` for a string that must stay out of
   logs, such as a password or a token.
 - The field is private and the only way in is a constructor that checks the rule, so every
   `InviteCode` in the program is valid. Code that takes an `InviteCode` doesn't check again.
 - The constructor's error is `Invalid<InviteCode>`. Its message names the type and states the
   rule.
-- Convert at the edges: parse into the newtype where the value enters (an HTTP request, a database
+- Convert at the edges. Parse into the newtype where the value enters (an HTTP request, a database
   row, config) and turn it back into a primitive only where it leaves.
 - Don't add `Deref` to the inner type, which hands out the primitive and loses the point.
 

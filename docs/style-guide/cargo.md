@@ -5,7 +5,7 @@
 Prefer a separate crate to a feature for an optional part. More features mean more combinations
 that the LSP and the test run each see only one of.
 
-`testing` exposes what other crates need to test against this one: test harnesses
+`testing` exposes what other crates need to test against this one, such as test harnesses
 (`Test<Service>`) and port contracts (`pub mod contract`). See [Testing](testing.md).
 
 ## Cargo.toml
@@ -42,7 +42,7 @@ uima-testing = { workspace = true }
 workspace = true
 ```
 
-- The root `[workspace.dependencies]` follows the same idea, wider: local crates first, then
+- The root `[workspace.dependencies]` follows the same idea, wider, with local crates first, then
   workspace dependencies split into a few blocks, with test- and dev-only dependencies last.
 - A dependency must go in `[workspace.dependencies]` when crates need the same version of it:
   its types cross a crate boundary (`tokio`, `serde`, `axum`, `tower`), or it holds

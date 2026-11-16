@@ -80,7 +80,7 @@ macro_rules! count {
         impl $name {
             /// A count of zero.
             pub const ZERO: Self = Self(0);
-            /// The highest count: the `max` given, else `i64::MAX`.
+            /// The highest count, the `max` given or else `i64::MAX`.
             pub const MAX: ::core::primitive::u64 = $max;
 
             /// `count`, or `AboveMax` above `MAX`.
@@ -445,7 +445,7 @@ mod props {
     crate::count!(TestCount);
     crate::count!(TestCapped, max = 3);
 
-    /// Any `u64`, often at the edges: zero, `max`, and just past it.
+    /// Any `u64`, often at the edges, such as zero, `max` and just past it.
     fn value(max: u64) -> impl Strategy<Value = u64> {
         prop_oneof![
             Just(0),
@@ -456,7 +456,7 @@ mod props {
         ]
     }
 
-    /// Any `i64`, often at the edges: zero, -1, `max`, and just past it.
+    /// Any `i64`, often at the edges, such as zero, -1, `max` and just past it.
     fn signed(max: u64) -> impl Strategy<Value = i64> {
         let max = max as i64;
         prop_oneof![

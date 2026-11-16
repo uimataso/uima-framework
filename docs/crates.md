@@ -22,11 +22,11 @@ crates/
 ## Naming
 
 - **Coupled to a library: `<purpose>-<library>`.** Apps are coupled to a library when they call it
-  directly or the crate's public API exposes its types: `log-tracing` (apps write
-  `tracing::info!`), `http-axum` (apps build axum `Router`s). A replacement library then gets its
-  own crate beside it, `<purpose>-<new>`, so apps on the old one keep getting fixes. The
-  `<purpose>` needn't be a crate of its own.
-- **Narrower use of another crate: `<base>-<what>`**, appended to the full name of the base:
+  directly or the crate's public API exposes its types, as with `log-tracing` (apps write
+  `tracing::info!`) and `http-axum` (apps build axum `Router`s). A replacement library then gets its
+  own crate beside it, `<purpose>-<new>`, so apps on the old one keep getting fixes. The `<purpose>`
+  needn't be a crate of its own.
+- **Narrower use of another crate: `<base>-<what>`**, appended to the full name of the base.
   `http-axum-api` is the JSON API layer of `http-axum`.
 - **Proc macros: `<name>-macro`**, named for the crate or concept whose items the macros generate
   code for. The
@@ -38,7 +38,7 @@ crates/
 
 Light crates keep an app that needs no database or OpenAPI from building them.
 
-- A crate that every service uses is light: it must not pull in a database driver, OpenAPI, or
+- A crate that every service uses is light, so it must not pull in a database driver, OpenAPI, or
   containers. Put those in their own heavy crate.
 - A light crate depends only on other light crates, so nothing heavy comes in indirectly.
 
@@ -52,7 +52,7 @@ twice with two incompatible copies of its types. Helpers tied to one crate go be
 ## Depending on the framework
 
 There is no facade crate re-exporting the others. An app lists the `uima-*` crates it uses once,
-all at the same `rev`: in its root `[workspace.dependencies]`, with its crates using
+all at the same `rev`, in its root `[workspace.dependencies]` with its crates using
 `{ workspace = true }`, or in `[dependencies]` for a single-crate app.
 
 ```toml

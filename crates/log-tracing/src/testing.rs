@@ -70,8 +70,8 @@ impl LogCapture {
     }
 
     /// Whether `text` is in any event's message or field values, or the field values of the spans
-    /// an event was logged in, at any level: to check that something, such as a secret, isn't
-    /// logged.
+    /// an event was logged in, at any level. Use it to check that something, such as a secret,
+    /// isn't logged.
     pub fn mentions(&self, text: &str) -> bool {
         let in_fields =
             |fields: &BTreeMap<String, String>| fields.values().any(|v| v.contains(text));
