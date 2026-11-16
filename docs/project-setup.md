@@ -186,7 +186,8 @@ rustc's and Clippy's default lints, plus a few more that the project's `Cargo.to
 ## Tests
 
 - **Runner**: the tests run with [nextest], and the doctests with `cargo test --doc`, since nextest
-  can't run doctests yet ([nextest#16]). Once it can, nextest runs both.
+  can't run doctests yet ([nextest#16]). Once it can, nextest runs both. Both turn on every
+  feature, so the tests behind one run too.
 - **Outside the sandbox**: the Rust tests run in the dev shell, not in `nix flake check`, so they
   can reach Docker and the project's other tools.
 - **Nix tests**: a flake check named `test-*` is a test of the nix code, and `just test` builds it

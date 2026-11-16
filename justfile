@@ -6,8 +6,8 @@ default:
 
 # run the tests; nextest skips doctests, so they run separately
 test: test-nix
-    cargo nextest run --workspace --no-tests=pass
-    cargo test --doc --workspace
+    cargo nextest run --workspace --all-features --no-tests=pass
+    cargo test --doc --workspace --all-features
 
 # the flake checks named `test-*`, such as the flake functions' tests
 test-nix:
