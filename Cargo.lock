@@ -922,6 +922,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "uima-testing"
+version = "0.0.0"
+dependencies = [
+ "assert2",
+ "tokio",
+]
+
+[[package]]
 name = "uima-time-jiff"
 version = "0.0.0"
 dependencies = [

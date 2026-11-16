@@ -25,7 +25,8 @@ grows:
   crate is behind `cfg(test)`.
 - `testing` and `contract` grow the same way as `tests`: inline first, then a file.
 
-Assertions use `assert2::check!` and `assert2::assert!`, never `std::assert*!`, for their output.
+Assertions use `uima_testing::check!` and `uima_testing::assert!`, never `std::assert*!`, for their
+output. A pattern match is `assert!(let Ok(user) = result)`.
 Group related cases into one test function named for the behavior instead of one function per
 case, e.g. `new_rejects_invalid_input` checking several inputs in a row.
 
