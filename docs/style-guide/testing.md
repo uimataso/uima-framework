@@ -34,14 +34,15 @@ case, e.g. `new_rejects_invalid_input` checking several inputs in a row.
 
 A harness sets up what a test runs against, such as a service in a container, and lives in a
 `testing` module. Each external service has one harness, in the crate for that service (e.g.
-`TestPostgres` in `uima-postgres`); a crate that needs several composes them into its own harness.
+`TestPostgres` in `uima-postgres-sqlx`); a crate that needs several composes them into its own
+harness.
 
 ```rust
 #[tokio::test]
 async fn saves_and_finds_a_user() {
-    let postgres = TestPostgres::start_with_migrations(&MIGRATOR).await;
+    let postgres = TestPostgres::start(&MIGRATOR).await;
 
-    let repo = PostgresUserRepo::new(postgres.fresh().await);
+    let repo = PostgresUserRepo::new(postgres.isolated().await);
     // ...
 }
 ```
@@ -51,31 +52,32 @@ async fn saves_and_finds_a_user() {
 - `start()` starts a service that runs for the rest of the test, and panics on failure. Call it at
   the top of the test function and share it between that function's cases. A harness with nothing
   running, e.g. one over fakes or in-memory implementations, uses `new()` instead. Either takes
-  variants named `<verb>_with_<what>()`, e.g. `start_with_migrations()`.
-- `fresh()`, when cases need their own resource, returns one, e.g. a client on a new database, and
-  panics on failure like `start()`. If it clears a shared resource instead of creating a new one,
-  say so in its doc, since the cases using it must then run one after another.
+  what most tests need as arguments, e.g. `start(&migrator)`, and a variant for a rarer setup
+  named `<verb>_with_<what>()`, e.g. `start_with_empty()`.
+- `isolated()`, when cases need their own resource, returns one, e.g. a client on a new database,
+  and panics on failure like `start()`. If it clears a shared resource instead of creating a new
+  one, say so in its doc, since the cases using it must then run one after another.
 - Fields are private; expose what tests need through methods such as `client()` and `url()`.
-- A composed harness holds the harnesses it starts. Its `start()` starts theirs, and its `fresh()`
-  builds on theirs.
+- A composed harness holds the harnesses it starts. Its `start()` starts theirs, and its
+  `isolated()` builds on theirs.
 
 ## Contract
 
 A port's `contract` is the test suite every implementation of the port must pass. It is a
 `pub mod contract` in the crate that defines the port, behind the `testing` feature. It exposes
-`run_all`, which runs every case in order, each on its own value from `fresh`, through
+`run_all`, which runs every case in order, each on its own value from `isolated`, through
 `uima_testing::run_case`. It panics at the first failure, naming the case and the line in
 `run_all` that ran it.
 
 ```rust
 // in the crate that defines the port
 pub mod contract {
-    pub async fn run_all<C>(fresh: impl AsyncFn() -> C)
+    pub async fn run_all<C>(isolated: impl AsyncFn() -> C)
     where
         C: HasUnitOfWork + HasUserRepo,
         C::UoW: HasUserRepo,
     {
-        run_case(&fresh, create_then_get_roundtrips).await;
+        run_case(&isolated, create_then_get_roundtrips).await;
         // ...
     }
 }
@@ -83,8 +85,8 @@ pub mod contract {
 // in an adapter crate
 #[tokio::test]
 async fn contract() {
-    let postgres = TestPostgres::start_with_migrations(&MIGRATOR).await;
-    contract::run_all(async || PostgresUserRepo::new(postgres.fresh().await)).await;
+    let postgres = TestPostgres::start(&MIGRATOR).await;
+    contract::run_all(async || PostgresUserRepo::new(postgres.isolated().await)).await;
 }
 ```
 

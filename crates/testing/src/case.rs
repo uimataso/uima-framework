@@ -5,17 +5,17 @@ use std::panic::{AssertUnwindSafe, Location, catch_unwind};
 use std::pin::pin;
 use std::task::Poll;
 
-/// Runs one case of a contract on a new context from `fresh`.
+/// Runs one case of a contract on a new context from `isolated`.
 ///
 /// A case is an `async fn` taking `&C`, returning `()` or `Result<(), E: Debug>`. When it or
-/// `fresh` panics, or it returns an error, `run_case` panics with the case's name, the line that
+/// `isolated` panics, or it returns an error, `run_case` panics with the case's name, the line that
 /// called `run_case`, and the panic message or the error.
 ///
 /// ```
 /// use uima_testing::{check, run_case};
 ///
-/// pub async fn run_all(fresh: impl AsyncFn() -> Vec<u32>) {
-///     run_case(&fresh, starts_empty).await;
+/// pub async fn run_all(isolated: impl AsyncFn() -> Vec<u32>) {
+///     run_case(&isolated, starts_empty).await;
 /// }
 ///
 /// async fn starts_empty(list: &Vec<u32>) {
@@ -25,7 +25,7 @@ use std::task::Poll;
 /// ```
 #[track_caller]
 pub fn run_case<'a, C, R>(
-    fresh: &'a impl AsyncFn() -> C,
+    isolated: &'a impl AsyncFn() -> C,
     case: impl AsyncFn(&C) -> R + 'a,
 ) -> impl Future<Output = ()> + 'a
 where
@@ -35,8 +35,8 @@ where
     let at = Location::caller();
     let name = case_name(&case);
     async move {
-        let failure = match catch_panic(fresh()).await {
-            Err(message) => Some(format!("fresh panicked: {message}")),
+        let failure = match catch_panic(isolated()).await {
+            Err(message) => Some(format!("isolated panicked: {message}")),
             Ok(ctx) => match catch_panic(case(&ctx)).await {
                 Err(message) => Some(format!("panicked: {message}")),
                 Ok(outcome) => outcome.into_result().err(),
@@ -168,21 +168,21 @@ mod tests {
 
     #[tokio::test]
     async fn a_passing_case_returns() {
-        let fresh = async || Ctx { id: 1 };
+        let isolated = async || Ctx { id: 1 };
 
-        run_case(&fresh, passes).await;
-        run_case(&fresh, passes_with_ok).await;
+        run_case(&isolated, passes).await;
+        run_case(&isolated, passes_with_ok).await;
     }
 
     #[tokio::test]
     async fn each_case_gets_a_new_context() {
         let made = AtomicU32::new(0);
-        let fresh = async || Ctx {
+        let isolated = async || Ctx {
             id: made.fetch_add(1, Ordering::SeqCst),
         };
 
-        run_case(&fresh, passes).await;
-        run_case(&fresh, async |ctx: &Ctx| {
+        run_case(&isolated, passes).await;
+        run_case(&isolated, async |ctx: &Ctx| {
             check!(ctx.id == 1);
         })
         .await;
@@ -192,9 +192,9 @@ mod tests {
     #[tokio::test]
     async fn a_case_that_awaits_runs_to_its_end() {
         let done = AtomicU32::new(0);
-        let fresh = async || Ctx { id: 1 };
+        let isolated = async || Ctx { id: 1 };
 
-        run_case(&fresh, async |_: &Ctx| {
+        run_case(&isolated, async |_: &Ctx| {
             tokio::task::yield_now().await;
             done.store(1, Ordering::SeqCst);
         })
@@ -205,8 +205,8 @@ mod tests {
     #[tokio::test]
     async fn a_failure_after_an_await_fails_the_case() {
         let message = panic_of(async {
-            let fresh = async || Ctx { id: 7 };
-            run_case(&fresh, fails_after_an_await).await;
+            let isolated = async || Ctx { id: 7 };
+            run_case(&isolated, fails_after_an_await).await;
         })
         .await;
 
@@ -217,8 +217,8 @@ mod tests {
     async fn a_failing_check_names_the_case_and_the_line() {
         let at = line_below(3);
         let message = panic_of(async {
-            let fresh = async || Ctx { id: 7 };
-            run_case(&fresh, fails_a_check).await;
+            let isolated = async || Ctx { id: 7 };
+            run_case(&isolated, fails_a_check).await;
         })
         .await;
 
@@ -231,8 +231,8 @@ mod tests {
     async fn an_error_names_the_case_and_the_line_and_shows_the_error() {
         let at = line_below(3);
         let message = panic_of(async {
-            let fresh = async || Ctx { id: 7 };
-            run_case(&fresh, returns_an_error).await;
+            let isolated = async || Ctx { id: 7 };
+            run_case(&isolated, returns_an_error).await;
         })
         .await;
 
@@ -245,8 +245,8 @@ mod tests {
     async fn a_panic_names_the_case_and_the_line_and_shows_its_message() {
         let at = line_below(3);
         let message = panic_of(async {
-            let fresh = async || Ctx { id: 7 };
-            run_case(&fresh, panics).await;
+            let isolated = async || Ctx { id: 7 };
+            run_case(&isolated, panics).await;
         })
         .await;
 
@@ -258,8 +258,8 @@ mod tests {
     #[tokio::test]
     async fn a_non_string_panic_says_so() {
         let message = panic_of(async {
-            let fresh = async || Ctx { id: 7 };
-            run_case(&fresh, panics_with_a_number).await;
+            let isolated = async || Ctx { id: 7 };
+            run_case(&isolated, panics_with_a_number).await;
         })
         .await;
 
@@ -270,14 +270,14 @@ mod tests {
     async fn a_panicking_fresh_names_the_case_and_the_line() {
         let at = line_below(3);
         let message = panic_of(async {
-            let fresh = async || -> Ctx { panic!("db down") };
-            run_case(&fresh, passes).await;
+            let isolated = async || -> Ctx { panic!("db down") };
+            run_case(&isolated, passes).await;
         })
         .await;
 
         assert!(message.starts_with("case `passes`, run at "));
         check!(message.contains(&at));
-        check!(message.ends_with("fresh panicked: db down"));
+        check!(message.ends_with("isolated panicked: db down"));
     }
 
     #[test]
