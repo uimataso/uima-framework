@@ -28,11 +28,19 @@
 //!
 //! Don't derive `Default`, or `Deserialize` without `try_from`: both make a value the checks
 //! never saw.
+//!
+//! # Lists
+//!
+//! A [`PageRule`] turns a request's limit and offset into an [`OffsetQuery`]; a read returns an
+//! [`OffsetPage`] when it tells whether more rows follow, or a [`CountedPage`] when it counts them
+//! all. A [`Sort`] pairs what a list sorts by with a [`SortOrder`].
 
 mod count;
 mod invalid;
 mod number;
+mod page;
 mod port_error;
+mod sort;
 mod text;
 mod uid;
 mod update;
@@ -40,7 +48,9 @@ mod update;
 pub use count::CountErrorKind;
 pub use invalid::{Invalid, Newtype};
 pub use number::NumberErrorKind;
+pub use page::{CountedPage, OffsetPage, OffsetQuery, PageErrorKind, PageRule};
 pub use port_error::{Failure, FailureKind, PortError, PortResult};
+pub use sort::{Sort, SortOrder};
 pub use text::{SecretErrorKind, TextErrorKind};
 pub use uid::UidErrorKind;
 pub use update::{Changed, Update, UpdateOption};
