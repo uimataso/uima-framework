@@ -22,6 +22,10 @@
 //! A variable counts as set when it isn't empty, whatever its value, so `FORCE_COLOR=0` turns
 //! colors on too. `CLICOLOR` and `CLICOLOR_FORCE` are ignored.
 //!
+//! # Features
+//!
+//! - `testing`: adds the `testing` module, with `LogCapture` to check what a test logged.
+//!
 //! [directive syntax]: https://docs.rs/tracing-subscriber/latest/tracing_subscriber/filter/struct.EnvFilter.html#directives
 
 use std::io::IsTerminal as _;
@@ -32,6 +36,9 @@ use tracing_subscriber::fmt::MakeWriter;
 use tracing_subscriber::layer::SubscriberExt as _;
 use tracing_subscriber::util::SubscriberInitExt as _;
 use tracing_subscriber::{EnvFilter, Layer, Registry};
+
+#[cfg(feature = "testing")]
+pub mod testing;
 
 /// Installs the subscriber, with `default_filter` for when `RUST_LOG` is unset or invalid.
 ///

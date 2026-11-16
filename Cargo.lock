@@ -893,6 +893,7 @@ dependencies = [
 name = "uima-log-tracing"
 version = "0.0.0"
 dependencies = [
+ "tokio",
  "tracing",
  "tracing-subscriber",
  "uima-testing",
