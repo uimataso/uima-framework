@@ -2,12 +2,11 @@
 
 ## Features
 
-A crate has at most one cargo feature, and it is `testing`.
+Prefer a separate crate to a feature for an optional part. More features mean more combinations
+that the LSP and the test run each see only one of.
 
-- `testing` exposes what other crates need to test against this one: test harnesses
-  (`Test<Service>`) and port contracts (`pub mod contract`). See [Testing](testing.md).
-- Anything else optional is its own crate, not a feature. More features mean more combinations
-  that the LSP and the test run each see only one of.
+`testing` exposes what other crates need to test against this one: test harnesses
+(`Test<Service>`) and port contracts (`pub mod contract`). See [Testing](testing.md).
 
 ## Cargo.toml
 

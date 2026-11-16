@@ -72,3 +72,28 @@ uima_core::text!(
 - Convert at the edges: parse into the newtype where the value enters (an HTTP request, a database
   row, config) and turn it back into a primitive only where it leaves.
 - Don't add `Deref` to the inner type, which hands out the primitive and loses the point.
+
+## Time
+
+A point in time is a `jiff::Timestamp` and a length of time is a `std::time::Duration`. jiff comes
+from `uima-time-jiff`, which re-exports it so every app has the same version; an app doesn't
+depend on jiff itself.
+
+```rust
+use std::time::Duration;
+
+use uima_time_jiff::TimestampExt as _;
+use uima_time_jiff::jiff::Timestamp;
+
+fn time_left(now: Timestamp, issued_at: Timestamp, ttl: Duration) -> Duration {
+    let expires_at = issued_at + ttl;
+    expires_at.saturating_duration_since(now)
+}
+```
+
+- A timestamp plus or minus a `Duration` is jiff's own. The `Duration` between two timestamps
+  comes from `TimestampExt`, so `SignedDuration` stays out of app code.
+- Name a length for what it is, `token_ttl: Duration`, not `token_ttl_secs: u64`. Turn it into a
+  number of seconds only where it leaves, such as a JSON field or a provider's request.
+- In config, a length parses with `uima_time_jiff::parse_duration` (`30s`, `1h 30m`, `30d`) and a time
+  zone with `NamedTimeZone`.
