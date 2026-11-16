@@ -96,8 +96,8 @@ impl PostgresUrl {
             // A URL with a password has a host, so setting one can't fail.
             let _ = url.set_password(Some("xxxxx"));
         }
-        let shown = url.as_str();
-        shown.strip_suffix('/').unwrap_or(shown).to_owned()
+        url.set_path("");
+        url.into()
     }
 }
 
@@ -207,6 +207,15 @@ mod tests {
         check!(
             format!("{url:?}") == r#"PostgresUrl("postgres://app:xxxxx@db:5432?sslmode=require")"#
         );
+    }
+
+    #[test]
+    fn shows_the_url_without_a_slash_before_its_query() {
+        let url: PostgresUrl = "postgres://app:s3cr3t@db:5432/?sslmode=require"
+            .parse()
+            .unwrap();
+
+        check!(url.to_string() == "postgres://app:xxxxx@db:5432?sslmode=require");
     }
 
     #[test]
