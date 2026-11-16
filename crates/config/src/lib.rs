@@ -33,8 +33,6 @@
 //! assert_eq!(config.data_dir, "/srv");
 //! assert_eq!(config.workers, 4);
 //! ```
-//!
-//! In tests, build the [`Env`] with [`Env::from_pairs`] instead of reading the process environment.
 
 mod env;
 

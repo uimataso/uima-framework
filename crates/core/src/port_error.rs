@@ -28,11 +28,11 @@ pub type PortResult<T, E = !> = Result<T, PortError<E>>;
 pub enum PortError<E> {
     /// An outcome the port's contract defines.
     Contract(E),
-    /// Whatever carries the call out failed: a database, an API, a queue.
+    /// Whatever carries the call out failed, such as a database, an API or a queue.
     Failed(Failure),
 }
 
-/// A failure of whatever carries a port call out: a database, an API, a queue.
+/// A failure of whatever carries a port call out, such as a database, an API or a queue.
 ///
 /// Its message is the outermost one of its source, the context the adapter added; the rest of
 /// the chain is its [`source`](Error::source).
@@ -47,12 +47,14 @@ pub struct Failure {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum FailureKind {
-    /// Lost to a concurrent operation on the same data, and undone: a serialization failure or
-    /// deadlock, or a version or etag that no longer matches. Not a problem with the data itself.
+    /// Lost to a concurrent operation on the same data, and undone.
+    ///
+    /// Such as a serialization failure or deadlock, or a version or etag that no longer matches.
+    /// Not a problem with the data itself.
     Conflict,
-    /// Gave up waiting: for a connection, a lock, or an answer.
+    /// Gave up waiting for a connection, a lock or an answer.
     Timeout,
-    /// The other side can't serve now: unreachable, or answering that it is down.
+    /// The other side can't serve now, being unreachable or answering that it is down.
     Unavailable,
     /// The other side refused because of too many requests.
     RateLimited,

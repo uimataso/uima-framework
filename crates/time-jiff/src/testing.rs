@@ -1,4 +1,4 @@
-//! Test helpers, behind the `testing` feature.
+//! Test helpers.
 
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;

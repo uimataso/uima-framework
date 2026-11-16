@@ -45,7 +45,7 @@ workspace = true
 - The root `[workspace.dependencies]` follows the same idea, wider: local crates first, then
   workspace dependencies split into a few blocks, with test- and dev-only dependencies last.
 - A dependency must go in `[workspace.dependencies]` when crates need the same version of it:
-  its types cross a crate boundary (`tokio`, `serde`, `jiff`, `axum`, `tower`), or it holds
+  its types cross a crate boundary (`tokio`, `serde`, `axum`, `tower`), or it holds
   global state (`tracing`).
 - Any other dependency can go either way. A workspace dependency keeps the version in one place,
   but a major version bump then has to happen in every crate at once; a crate-local one lets each

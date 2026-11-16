@@ -5,7 +5,7 @@ use jiff::{Span, SpanRelativeTo};
 /// Parses a length of time from config, such as `30s`, `1h 30m`, `30d` or `PT30S`.
 ///
 /// It takes jiff's friendly format and ISO 8601, with a day as 24 hours and a week as 7 days.
-/// Like humantime, it ignores whitespace around the length and takes a bare `0`. A negative
+/// It ignores whitespace around the length and takes a bare `0`. A negative
 /// length, or one in months or years, which have no fixed length, is an error.
 ///
 /// ```

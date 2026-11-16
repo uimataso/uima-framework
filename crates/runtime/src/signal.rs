@@ -3,8 +3,7 @@
 use tracing::info;
 use uima_cancel::{CancelExt as _, CancelToken};
 
-/// Completes on SIGINT (Ctrl-C) or, on unix, SIGTERM, which is what `docker stop` sends, and
-/// logs which one arrived.
+/// Completes on SIGINT (Ctrl-C) or, on unix, SIGTERM, and logs which one arrived.
 ///
 /// # Panics
 ///

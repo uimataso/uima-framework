@@ -18,7 +18,7 @@ use std::fmt;
 ///
 /// The type is `Copy`, ordered, hashable, and `Default` to zero. It has:
 ///
-/// - `ZERO`, a count of zero, and `MAX`, the highest count as a `u64`.
+/// - `ZERO` and `MAX`.
 /// - `new`, which rejects a value above `MAX`.
 /// - `get` and `is_zero`.
 /// - `remaining`, how many more fit before `MAX`.
@@ -218,9 +218,9 @@ macro_rules! count {
 /// What is wrong with a count.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CountErrorKind {
-    /// Below zero: read back from a negative number, or more taken away than there is.
+    /// Below zero, read back from a negative number or with more taken away than there is.
     Negative { received: i128 },
-    /// Above the max: given a larger number, or more added than fits.
+    /// Above the max, given a larger number or with more added than fits.
     AboveMax { received: u128, max: u64 },
 }
 

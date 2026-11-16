@@ -97,5 +97,5 @@ fn time_left(now: Timestamp, issued_at: Timestamp, ttl: Duration) -> Duration {
   comes from `TimestampExt`, so `SignedDuration` stays out of app code.
 - Name a length for what it is, `token_ttl: Duration`, not `token_ttl_secs: u64`. Turn it into a
   number of seconds only where it leaves, such as a JSON field or a provider's request.
-- In config, a length parses with `uima_time_jiff::parse_duration` (`30s`, `1h 30m`, `30d`) and a time
-  zone with `NamedTimeZone`.
+- In config, a length parses with `uima_time_jiff::parse_duration` (`30s`, `1h 30m`, `30d`) and a
+  time zone with `NamedTimeZone`.

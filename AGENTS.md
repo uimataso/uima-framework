@@ -22,5 +22,5 @@ sowah, nova-el, techo and genkan.
 
 ## Checks
 
-Run `just check test` before a commit. What each recipe runs, and what CI runs, is in
-[Recipes](docs/project-setup.md#recipes).
+Before a commit, run the checks [Recipes](docs/project-setup.md#recipes) names; it also says what
+each recipe and CI run.

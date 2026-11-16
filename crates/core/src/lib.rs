@@ -22,12 +22,12 @@
 //! # Newtypes
 //!
 //! [`uid!`], [`count!`], [`number!`], [`text!`] and [`secret!`] each define a newtype that holds
-//! only checked values. A type's errors are [`Invalid<Name>`](Invalid), and the attributes before
-//! its name, such as doc comments and derives, go on the struct. With serde, deserializing goes
-//! through the checks with `try_from`, and serializing writes the inner value with `into`, as in
-//! the example. `uid!` types do the same with `"String"`, and `count!` and `number!` types with
-//! `"i64"`; see [`secret!`] for a secret. Don't derive `Default`, or `Deserialize` without
-//! `try_from`: both make a value the checks never saw.
+//! only checked values, with [`Invalid<Name>`](Invalid) as its error. Each macro's doc says what
+//! the type implements. With serde, use `try_from` and `into` with the type the macro
+//! converts from, as in the example.
+//!
+//! Don't derive `Default`, or `Deserialize` without `try_from`: both make a value the checks
+//! never saw.
 
 mod count;
 mod invalid;

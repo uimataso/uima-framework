@@ -1,7 +1,7 @@
 # Project setup
 
-What a project's repo has around its code, and how to set it up. This repo follows it, so its
-own files are the working example.
+What a project's repo has around its code, and how to set it up. This repo follows the parts that
+apply to a library, so its own files are the example for those.
 
 ## Recipes
 
@@ -185,9 +185,8 @@ rustc's and Clippy's default lints, plus a few more that the project's `Cargo.to
 
 ## Tests
 
-- **Runner**: the tests run with [nextest], and the doctests with `cargo test --doc`, since nextest
-  can't run doctests yet ([nextest#16]). Once it can, nextest runs both. Both turn on every
-  feature, so the tests behind one run too.
+- **Runner**: the tests run with [nextest], and the doctests with `cargo test --doc`, which nextest
+  doesn't run. Both turn on every feature, so the tests behind one run too.
 - **Outside the sandbox**: the Rust tests run in the dev shell, not in `nix flake check`, so they
   can reach Docker and the project's other tools.
 - **Nix tests**: a flake check named `test-*` is a test of the nix code, and `just test` builds it
@@ -201,7 +200,6 @@ rustc's and Clippy's default lints, plus a few more that the project's `Cargo.to
 
 [crane]: https://crane.dev
 [nextest]: https://nexte.st
-[nextest#16]: https://github.com/nextest-rs/nextest/issues/16
 [testcontainers]: https://github.com/testcontainers/testcontainers-rs
 [rust-overlay]: https://github.com/oxalica/rust-overlay
 [treefmt]: https://github.com/numtide/treefmt

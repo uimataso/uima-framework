@@ -7,9 +7,9 @@ use std::task::Poll;
 
 /// Runs one case of a contract on a new context from `fresh`.
 ///
-/// A case is an `async fn` taking `&C`, returning `()` or `Result<(), E: Debug>`. When it or `fresh` panics,
-/// or it returns an error, `run_case` panics with the case's name, the line that called
-/// `run_case`, and the panic message or the error.
+/// A case is an `async fn` taking `&C`, returning `()` or `Result<(), E: Debug>`. When it or
+/// `fresh` panics, or it returns an error, `run_case` panics with the case's name, the line that
+/// called `run_case`, and the panic message or the error.
 ///
 /// ```
 /// use uima_testing::{check, run_case};

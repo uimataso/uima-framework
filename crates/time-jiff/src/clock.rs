@@ -1,7 +1,6 @@
 use jiff::Timestamp;
 
-/// Where the app gets the current time, so a test can control it with
-/// `testing::SimulatedClock`.
+/// Where the app gets the current time.
 ///
 /// `now` is to the microsecond, the precision Postgres stores, so a time saved and read back is
 /// equal to the one the app has.

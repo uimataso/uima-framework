@@ -9,11 +9,9 @@ Every crate lives directly under `crates/`, one level deep:
 
 ```sh
 crates/
-├── core/           # uima-core
-├── core-macro/     # uima-core-macro: the proc macros of core/
-├── log-tracing/    # uima-log-tracing
-├── http-axum/      # uima-http-axum
-├── http-axum-api/  # uima-http-axum-api: the JSON API layer on top of http-axum/
+├── core/         # uima-core
+├── log-tracing/  # uima-log-tracing
+├── port-macro/   # uima-port-macro
 └── ...
 ```
 
@@ -30,14 +28,15 @@ crates/
   `<purpose>` needn't be a crate of its own.
 - **Narrower use of another crate: `<base>-<what>`**, appended to the full name of the base:
   `http-axum-api` is the JSON API layer of `http-axum`.
-- **Proc macros: `<crate>-macro`**, for the crate whose items the macros generate code for. The
+- **Proc macros: `<name>-macro`**, named for the crate or concept whose items the macros generate
+  code for. The
   generated code must not hard-code `::uima_<crate>::` paths, since an app may rename the
   dependency.
 - **Otherwise a plain name** for what the crate does.
 
 ## Light and heavy crates
 
-The services include small ones without a database that only serve HTML.
+Light crates keep an app that needs no database or OpenAPI from building them.
 
 - A crate that every service uses is light: it must not pull in a database driver, OpenAPI, or
   containers. Put those in their own heavy crate.

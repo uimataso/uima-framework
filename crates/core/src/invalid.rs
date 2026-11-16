@@ -8,8 +8,8 @@ use std::fmt;
 pub trait Newtype {
     /// The type's name, as error messages show it.
     const NAME: &'static str;
-    /// What can be wrong with a value, such as [`CountErrorKind`](crate::CountErrorKind). Its message
-    /// follows the type's name: "can't exceed 3, received: 4".
+    /// What can be wrong with a value, such as [`CountErrorKind`](crate::CountErrorKind). Its
+    /// message follows the type's name: "can't exceed 3, received: 4".
     type Kind: fmt::Debug + fmt::Display;
 }
 

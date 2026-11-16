@@ -14,5 +14,7 @@ How this repo's own crates are laid out and named is in [docs/crates.md](../crat
 General background reading, not specific to this guide; where they disagree with it, this guide
 wins:
 
-- [Canonical's Rust best practices](https://canonical.github.io/rust-best-practices/introduction.html)
+- [Canonical's Rust best practices][canonical]
 - [Rust API guidelines](https://rust-lang.github.io/api-guidelines/about.html)
+
+[canonical]: https://canonical.github.io/rust-best-practices/introduction.html
