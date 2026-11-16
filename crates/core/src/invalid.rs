@@ -99,7 +99,7 @@ impl<T: Newtype<Kind: Eq>> Eq for Invalid<T> {}
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
+    use uima_testing::check;
 
     use super::*;
 

@@ -189,7 +189,7 @@ impl fmt::Display for NumberErrorKind {
     reason = "a type needn't use every method the macro defines"
 )]
 mod tests {
-    use assert2::check;
+    use uima_testing::check;
 
     use super::*;
     use crate::{Invalid, Newtype};

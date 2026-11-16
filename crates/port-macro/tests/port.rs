@@ -3,8 +3,8 @@
 use std::future::Future;
 use std::sync::Arc;
 
-use assert2::check;
 use uima_port_macro::{HasPort, has_port};
+use uima_testing::check;
 
 #[has_port]
 pub trait UserRepo {

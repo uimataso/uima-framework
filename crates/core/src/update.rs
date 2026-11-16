@@ -207,7 +207,7 @@ impl<T> From<UpdateOption<T>> for Option<Option<T>> {
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
+    use uima_testing::check;
 
     use super::*;
 

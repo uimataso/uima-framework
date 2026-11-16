@@ -96,7 +96,7 @@ impl DropGuard {
 mod tests {
     use std::time::Duration;
 
-    use assert2::check;
+    use uima_testing::check;
 
     use super::*;
 

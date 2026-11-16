@@ -23,7 +23,7 @@ pub fn duration<'de, D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<D
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
+    use uima_testing::check;
 
     use super::*;
 

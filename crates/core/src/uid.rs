@@ -147,7 +147,7 @@ impl fmt::Display for UidErrorKind {
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
+    use uima_testing::check;
     use uuid::Uuid;
 
     use super::*;

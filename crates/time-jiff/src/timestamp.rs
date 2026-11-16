@@ -30,7 +30,7 @@ impl TimestampExt for Timestamp {
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
+    use uima_testing::check;
 
     use super::*;
 

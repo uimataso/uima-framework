@@ -55,7 +55,7 @@ impl std::error::Error for InvalidDuration {}
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
+    use uima_testing::check;
 
     use super::*;
 

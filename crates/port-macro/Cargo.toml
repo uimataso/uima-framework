@@ -16,9 +16,9 @@ quote = "1"
 syn = { version = "3", features = ["full"] }
 
 [dev-dependencies]
-assert2 = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt"] }
 trybuild = "1"
+uima-testing = { workspace = true }
 
 [lints]
 workspace = true

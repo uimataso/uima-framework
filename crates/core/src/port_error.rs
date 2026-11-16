@@ -150,7 +150,7 @@ impl Error for Failure {
 #[cfg(test)]
 mod tests {
     use anyhow::Context as _;
-    use assert2::check;
+    use uima_testing::check;
 
     use super::*;
 

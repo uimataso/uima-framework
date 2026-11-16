@@ -450,7 +450,7 @@ pub fn check<R>(
 mod tests {
     use std::str::FromStr;
 
-    use assert2::check;
+    use uima_testing::check;
 
     use super::*;
     use crate::{Invalid, Newtype};

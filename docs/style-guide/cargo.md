@@ -36,7 +36,7 @@ base64 = "0.22"
 testcontainers = { workspace = true, optional = true }
 
 [dev-dependencies]
-assert2 = { workspace = true }
+uima-testing = { workspace = true }
 
 [lints]
 workspace = true

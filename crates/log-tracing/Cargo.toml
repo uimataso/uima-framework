@@ -14,7 +14,7 @@ tracing-subscriber = { workspace = true, features = [
 ] }
 
 [dev-dependencies]
-assert2 = { workspace = true }
+uima-testing = { workspace = true }
 
 [lints]
 workspace = true

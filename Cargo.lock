@@ -864,17 +864,17 @@ dependencies = [
 name = "uima-cancel"
 version = "0.0.0"
 dependencies = [
- "assert2",
  "tokio",
  "tokio-util",
+ "uima-testing",
 ]
 
 [[package]]
 name = "uima-config"
 version = "0.0.0"
 dependencies = [
- "assert2",
  "tracing",
+ "uima-testing",
 ]
 
 [[package]]
@@ -882,10 +882,10 @@ name = "uima-core"
 version = "0.0.0"
 dependencies = [
  "anyhow",
- "assert2",
  "proptest",
  "serde",
  "serde_json",
+ "uima-testing",
  "uuid",
 ]
 
@@ -893,32 +893,32 @@ dependencies = [
 name = "uima-log-tracing"
 version = "0.0.0"
 dependencies = [
- "assert2",
  "tracing",
  "tracing-subscriber",
+ "uima-testing",
 ]
 
 [[package]]
 name = "uima-port-macro"
 version = "0.0.0"
 dependencies = [
- "assert2",
  "heck",
  "proc-macro2",
  "quote",
  "syn 3.0.10",
  "tokio",
  "trybuild",
+ "uima-testing",
 ]
 
 [[package]]
 name = "uima-runtime"
 version = "0.0.0"
 dependencies = [
- "assert2",
  "tokio",
  "tracing",
  "uima-cancel",
+ "uima-testing",
 ]
 
 [[package]]
@@ -933,10 +933,10 @@ dependencies = [
 name = "uima-time-jiff"
 version = "0.0.0"
 dependencies = [
- "assert2",
  "jiff",
  "serde",
  "serde_json",
+ "uima-testing",
 ]
 
 [[package]]

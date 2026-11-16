@@ -237,7 +237,7 @@ impl fmt::Display for CountErrorKind {
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
+    use uima_testing::check;
 
     use super::*;
     use crate::{Invalid, Newtype};

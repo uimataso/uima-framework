@@ -98,8 +98,8 @@ impl std::error::Error for InvalidTimeZone {}
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
     use jiff::Timestamp;
+    use uima_testing::check;
 
     use super::*;
 

@@ -44,7 +44,7 @@ pub async fn cancel_on_shutdown_signal(token: &CancelToken) {
 mod tests {
     use std::time::Duration;
 
-    use assert2::check;
+    use uima_testing::check;
 
     use super::*;
     use crate::TimeoutExt as _;

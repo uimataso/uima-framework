@@ -21,6 +21,7 @@ todo = "warn"
 [workspace.dependencies]
 # local crates
 uima-cancel = { path = "./crates/cancel", version = "0.0.0" }
+uima-testing = { path = "./crates/testing", version = "0.0.0" }
 
 # workspace dependencies
 tokio = { version = "1", default-features = false }

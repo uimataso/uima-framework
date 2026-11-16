@@ -10,8 +10,8 @@ authors.workspace = true
 tokio-util = { version = "0.7.19", default-features = false }
 
 [dev-dependencies]
-assert2 = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt", "time"] }
+uima-testing = { workspace = true }
 
 [lints]
 workspace = true

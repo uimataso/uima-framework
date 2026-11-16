@@ -14,8 +14,8 @@ tokio = { workspace = true, features = ["macros", "signal", "time"] }
 tracing = { workspace = true }
 
 [dev-dependencies]
-assert2 = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt", "test-util"] }
+uima-testing = { workspace = true }
 
 [lints]
 workspace = true

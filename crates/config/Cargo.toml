@@ -9,7 +9,7 @@ authors.workspace = true
 tracing = { workspace = true }
 
 [dev-dependencies]
-assert2 = { workspace = true }
+uima-testing = { workspace = true }
 
 [lints]
 workspace = true

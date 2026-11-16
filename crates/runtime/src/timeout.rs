@@ -16,7 +16,7 @@ impl<F: Future> TimeoutExt for F {}
 
 #[cfg(test)]
 mod tests {
-    use assert2::check;
+    use uima_testing::check;
 
     use super::*;
 

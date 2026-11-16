@@ -2,7 +2,7 @@
 //! `/usr/share/zoneinfo`.
 #![cfg(feature = "tzdb-bundle-always")]
 
-use assert2::check;
+use uima_testing::check;
 use uima_time_jiff::jiff::tz::TimeZoneDatabase;
 
 #[test]

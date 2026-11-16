@@ -164,7 +164,7 @@ mod tests {
     use std::io::Write;
     use std::sync::{Arc, Mutex};
 
-    use assert2::check;
+    use uima_testing::check;
 
     use super::*;
 
