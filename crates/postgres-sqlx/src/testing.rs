@@ -4,6 +4,9 @@ use std::sync::atomic::{AtomicU32, Ordering};
 
 use sqlx::migrate::Migrator;
 use sqlx::{AssertSqlSafe, PgPool};
+use testcontainers::bollard::errors::Error::DockerResponseServerError;
+use testcontainers::bollard::query_parameters::RemoveContainerOptionsBuilder;
+use testcontainers::bollard::{self, Docker};
 use testcontainers::core::{Mount, WaitFor};
 use testcontainers::runners::AsyncRunner as _;
 use testcontainers::{ContainerAsync, ContainerRequest, GenericImage, ImageExt as _};
@@ -50,10 +53,8 @@ impl TestPostgres {
     ///
     /// If the container doesn't start, its server can't be reached, or a migration fails.
     pub async fn start(migrator: &Migrator) -> Self {
-        let container = image()
-            .start()
-            .await
-            .expect("the postgres container starts");
+        let name = container_name();
+        let container = start_container(image(&name), &name).await;
         let url = server_url(&container).await;
         migrate_template(&url, migrator).await;
 
@@ -92,14 +93,54 @@ impl TestPostgres {
     }
 }
 
-/// Postgres in memory, without syncing to disk, since a test's data needn't survive a crash.
-fn image() -> ContainerRequest<GenericImage> {
+/// `request` started, or, when it fails, the container named `name` removed before the panic,
+/// since one created but never started has nothing that removes it.
+///
+/// # Panics
+///
+/// If the container doesn't start.
+async fn start_container(
+    request: ContainerRequest<GenericImage>,
+    name: &str,
+) -> ContainerAsync<GenericImage> {
+    let error = match request.start().await {
+        Ok(container) => return container,
+        Err(error) => error,
+    };
+    match remove_container(name).await {
+        Ok(()) => panic!("the postgres container starts: {error}"),
+        Err(removing) => {
+            panic!("the postgres container starts: {error}; removing {name} failed: {removing}")
+        }
+    }
+}
+
+/// Removes the container named `name`, if there is one.
+async fn remove_container(name: &str) -> Result<(), bollard::errors::Error> {
+    let options = RemoveContainerOptionsBuilder::new()
+        .force(true)
+        .v(true)
+        .build();
+    let removed = Docker::connect_with_defaults()?
+        .remove_container(name, Some(options))
+        .await;
+    match removed {
+        Err(DockerResponseServerError {
+            status_code: 404, ..
+        }) => Ok(()),
+        removed => removed,
+    }
+}
+
+/// Postgres in memory named `name`, without syncing to disk, since a test's data needn't survive a
+/// crash.
+fn image(name: &str) -> ContainerRequest<GenericImage> {
     GenericImage::new("postgres", "17.9")
         .with_wait_for(WaitFor::message_on_stderr(
             "database system is ready to accept connections",
         ))
         .with_env_var("POSTGRES_PASSWORD", PASSWORD)
-        .with_container_name(container_name())
+        .with_container_name(name)
         .with_mount(Mount::tmpfs_mount("/var/lib/postgresql/data"))
         .with_cmd([
             "postgres",
@@ -188,6 +229,8 @@ pub(crate) async fn test_migrator() -> Migrator {
 
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
+
     use uima_testing::check;
 
     use super::*;
@@ -226,6 +269,20 @@ mod tests {
                 .unwrap();
             check!(shown == "off", "{setting}");
         }
+    }
+
+    #[tokio::test]
+    async fn a_container_that_doesnt_start_is_removed() {
+        let name = container_name();
+        let request = image(&name).with_startup_timeout(Duration::from_millis(1));
+
+        let starting = name.clone();
+        let started = tokio::spawn(async move { start_container(request, &starting).await });
+        check!(started.await.unwrap_err().is_panic());
+
+        let docker = Docker::connect_with_defaults().unwrap();
+        let found = docker.inspect_container(&name, None).await;
+        check!(let Err(DockerResponseServerError { status_code: 404, .. }) = found);
     }
 
     /// Whether `name` is one Docker takes.
