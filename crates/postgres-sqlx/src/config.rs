@@ -20,8 +20,8 @@ const MAX_TIMEOUT: Duration = Duration::from_millis(2_147_483_647);
 pub struct PostgresConfig {
     /// How many connections the pool opens at most.
     pub max_connections: MaxConnections,
-    /// How long a query waits for a free connection, and connecting waits for the server. Longer
-    /// than zero and at most `i32::MAX` milliseconds, about 24 days.
+    /// How long a query waits for a free connection, and each step of connecting waits for the
+    /// server. Longer than zero and at most `i32::MAX` milliseconds, about 24 days.
     pub acquire_timeout: Duration,
     /// How long a statement waits for a row or table lock, in whole milliseconds rounded up, at
     /// most `i32::MAX`, about 24 days, as Postgres takes it. Zero waits forever, as in Postgres.
