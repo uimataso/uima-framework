@@ -2916,6 +2916,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "uima-client-postgres-sqlx"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "proptest",
+ "sqlx",
+ "testcontainers",
+ "tokio",
+ "tracing",
+ "uima-config",
+ "uima-core",
+ "uima-testing",
+ "uima-time",
+ "url",
+]
+
+[[package]]
 name = "uima-config"
 version = "0.0.0"
 dependencies = [
@@ -2948,12 +2965,12 @@ dependencies = [
  "tower-http",
  "tracing",
  "uima-core",
- "uima-log-tracing",
+ "uima-log-tracing-subscriber",
  "uima-testing",
 ]
 
 [[package]]
-name = "uima-log-tracing"
+name = "uima-log-tracing-subscriber"
 version = "0.0.0"
 dependencies = [
  "tokio",
@@ -2976,23 +2993,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "uima-postgres-sqlx"
-version = "0.0.0"
-dependencies = [
- "anyhow",
- "proptest",
- "sqlx",
- "testcontainers",
- "tokio",
- "tracing",
- "uima-config",
- "uima-core",
- "uima-testing",
- "uima-time-jiff",
- "url",
-]
-
-[[package]]
 name = "uima-runtime"
 version = "0.0.0"
 dependencies = [
@@ -3011,7 +3011,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "uima-time-jiff"
+name = "uima-time"
 version = "0.0.0"
 dependencies = [
  "jiff",

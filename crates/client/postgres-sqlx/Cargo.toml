@@ -1,0 +1,48 @@
+[package]
+name = "uima-client-postgres-sqlx"
+version.workspace = true
+rust-version.workspace = true
+edition.workspace = true
+authors.workspace = true
+
+[features]
+# test helpers
+testing = ["dep:testcontainers"]
+
+[dependencies]
+# local crates
+uima-config = { workspace = true }
+uima-core = { workspace = true }
+uima-time = { workspace = true }
+
+# workspace dependencies
+anyhow = { workspace = true }
+tokio = { workspace = true, features = ["sync", "time"] }
+tracing = { workspace = true }
+
+# crate-local dependencies
+sqlx = { version = "0.9", default-features = false, features = [
+  "migrate",
+  "postgres",
+  "runtime-tokio",
+  "tls-rustls",
+] }
+url = "2"
+
+# testing-only, behind the `testing` feature
+testcontainers = { version = "0.28", optional = true }
+
+[dev-dependencies]
+proptest = { workspace = true }
+tokio = { workspace = true, features = [
+  "io-util",
+  "macros",
+  "net",
+  "rt",
+  "time",
+] }
+uima-core = { workspace = true, features = ["testing"] }
+uima-testing = { workspace = true }
+
+[lints]
+workspace = true
