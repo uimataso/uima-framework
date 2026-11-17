@@ -11,9 +11,9 @@ use std::fmt;
 ///     pub CommentCount
 /// );
 ///
-/// let comments = CommentCount::ZERO.increment();
+/// let comments = CommentCount::ZERO.saturating_increment();
 /// assert_eq!(comments.get(), 1);
-/// assert_eq!(comments.decrement().decrement(), CommentCount::ZERO);
+/// assert_eq!(comments.saturating_decrement().saturating_decrement(), CommentCount::ZERO);
 /// ```
 ///
 /// The type is `Copy`, ordered, hashable, and `Default` to zero. It has:
@@ -22,8 +22,8 @@ use std::fmt;
 /// - `new`, which rejects a value above `MAX`.
 /// - `get` and `is_zero`.
 /// - `remaining`, how many more fit before `MAX`.
-/// - `increment`, `decrement`, `saturating_add` and `saturating_sub`, which stop at `MAX` and at
-///   zero.
+/// - `saturating_increment`, `saturating_decrement`, `saturating_add` and `saturating_sub`, which
+///   stop at `MAX` and at zero.
 /// - `try_increment`, `try_decrement`, `try_add` and `try_sub`, which fail there instead.
 /// - `TryFrom<i64>`, `From<Name> for i64`, and `Display`.
 ///
@@ -144,13 +144,13 @@ macro_rules! count {
 
             /// One more, stopping at `MAX`.
             #[must_use]
-            pub const fn increment(self) -> Self {
+            pub const fn saturating_increment(self) -> Self {
                 self.saturating_add(1)
             }
 
             /// One fewer, stopping at zero.
             #[must_use]
-            pub const fn decrement(self) -> Self {
+            pub const fn saturating_decrement(self) -> Self {
                 self.saturating_sub(1)
             }
 
@@ -300,22 +300,22 @@ mod tests {
 
     #[test]
     fn increments_and_decrements() {
-        check!(count(4).increment() == count(5));
-        check!(count(4).decrement() == count(3));
-        check!(capped(2).decrement() == capped(1));
+        check!(count(4).saturating_increment() == count(5));
+        check!(count(4).saturating_decrement() == count(3));
+        check!(capped(2).saturating_decrement() == capped(1));
     }
 
     #[test]
     fn increment_stops_at_max() {
-        check!(count(TestCount::MAX).increment() == count(TestCount::MAX));
-        check!(capped(2).increment() == capped(3));
-        check!(capped(3).increment() == capped(3));
+        check!(count(TestCount::MAX).saturating_increment() == count(TestCount::MAX));
+        check!(capped(2).saturating_increment() == capped(3));
+        check!(capped(3).saturating_increment() == capped(3));
     }
 
     #[test]
     fn decrement_stops_at_zero() {
-        check!(TestCount::ZERO.decrement() == TestCount::ZERO);
-        check!(TestCapped::ZERO.decrement() == TestCapped::ZERO);
+        check!(TestCount::ZERO.saturating_decrement() == TestCount::ZERO);
+        check!(TestCapped::ZERO.saturating_decrement() == TestCapped::ZERO);
     }
 
     #[test]
@@ -508,7 +508,7 @@ mod props {
                     #[test]
                     fn increment_adds_one_up_to_max(n in 0..=$count::MAX) {
                         let count = $count::new(n).unwrap();
-                        prop_assert_eq!(count.increment().get(), (n + 1).min($count::MAX));
+                        prop_assert_eq!(count.saturating_increment().get(), (n + 1).min($count::MAX));
                         match count.try_increment() {
                             Ok(next) => prop_assert_eq!(next.get(), n + 1),
                             Err(error) => {
@@ -527,7 +527,7 @@ mod props {
                     #[test]
                     fn decrement_takes_one_down_to_zero(n in 0..=$count::MAX) {
                         let count = $count::new(n).unwrap();
-                        prop_assert_eq!(count.decrement().get(), n.saturating_sub(1));
+                        prop_assert_eq!(count.saturating_decrement().get(), n.saturating_sub(1));
                         match count.try_decrement() {
                             Ok(previous) => prop_assert_eq!(previous.get(), n - 1),
                             Err(error) => {

@@ -12,7 +12,7 @@
 //!
 //! let cancel = CancelToken::new();
 //! // If the server stops, for any reason, stop the workers too.
-//! let server = serve().cancel_on_finish(&cancel);
+//! let server = serve().cancel_on_exit(&cancel);
 //! tokio::join!(server, run_workers(cancel.clone()));
 //! # }
 //! ```
@@ -69,10 +69,7 @@ pub trait CancelExt: Future + Sized {
 
     /// Runs the future and cancels `token` once it completes, or once it is dropped unfinished,
     /// so the rest of the work stops with it.
-    fn cancel_on_finish(
-        self,
-        token: &CancelToken,
-    ) -> impl Future<Output = Self::Output> + use<Self> {
+    fn cancel_on_exit(self, token: &CancelToken) -> impl Future<Output = Self::Output> + use<Self> {
         let guard = token.clone().drop_guard();
         async move {
             let _guard = guard;
@@ -144,16 +141,16 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn cancel_on_finish_cancels_once_the_future_completes() {
+    async fn cancel_on_exit_cancels_once_the_future_completes() {
         let token = CancelToken::new();
-        check!(async { 1 }.cancel_on_finish(&token).await == 1);
+        check!(async { 1 }.cancel_on_exit(&token).await == 1);
         check!(token.is_cancelled());
     }
 
     #[tokio::test]
-    async fn cancel_on_finish_cancels_when_the_future_is_dropped_unfinished() {
+    async fn cancel_on_exit_cancels_when_the_future_is_dropped_unfinished() {
         let token = CancelToken::new();
-        let unfinished = std::future::pending::<()>().cancel_on_finish(&token);
+        let unfinished = std::future::pending::<()>().cancel_on_exit(&token);
         let timed_out = tokio::time::timeout(Duration::from_millis(1), unfinished).await;
         check!(timed_out.is_err());
         check!(token.is_cancelled());
@@ -162,7 +159,7 @@ mod tests {
     #[tokio::test]
     async fn the_wrapped_futures_stay_send_and_static() {
         let token = CancelToken::new();
-        let finished = tokio::spawn(async { 1 }.cancel_on_finish(&token));
+        let finished = tokio::spawn(async { 1 }.cancel_on_exit(&token));
         check!(finished.await.unwrap() == 1);
         let output = tokio::spawn(async { 2 }.until_cancelled(&CancelToken::new()));
         check!(output.await.unwrap() == Some(2));

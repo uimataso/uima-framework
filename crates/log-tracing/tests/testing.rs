@@ -11,5 +11,5 @@ fn the_testing_feature_exposes_log_capture() {
     let logs = LogCapture::start();
     tracing::warn!("retrying later");
 
-    check!(logs.contains(Level::WARN, "retrying"));
+    check!(logs.has_message(Level::WARN, "retrying"));
 }
