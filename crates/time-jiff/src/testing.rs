@@ -52,13 +52,12 @@ impl SimulatedClock {
     pub fn advance_to(&self, to: Timestamp) {
         let to = to_micros(to);
         let mut now = self.lock();
-        let from = *now;
-        if to >= from {
-            *now = to;
-            return;
+        if to < *now {
+            let from = *now;
+            drop(now);
+            panic!("can't move the clock back from {from} to {to}");
         }
-        drop(now);
-        panic!("can't move the clock back from {from} to {to}");
+        *now = to;
     }
 
     /// Moves the clock forward by `by`.
