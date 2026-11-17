@@ -3,11 +3,10 @@
 
 mod offset;
 
+use std::error::Error;
 use std::fmt;
 
 pub use offset::{CountedPage, OffsetPage, OffsetQuery};
-
-use crate::{Invalid, Newtype};
 
 /// How a list pages: the limit when a request gives none, and the largest it may ask for. Every
 /// kind of page takes its limit from one.
@@ -60,47 +59,45 @@ impl PageRule {
         &self,
         limit: Option<u32>,
         offset: Option<u32>,
-    ) -> Result<OffsetQuery, Invalid<PageRule>> {
+    ) -> Result<OffsetQuery, InvalidPage> {
         let limit = limit.unwrap_or(self.default);
         if limit == 0 {
-            return Err(Invalid::new(PageErrorKind::ZeroLimit));
+            return Err(InvalidPage::ZeroLimit);
         }
 
         if limit > self.max {
-            return Err(Invalid::new(PageErrorKind::AboveMax {
+            return Err(InvalidPage::AboveMax {
                 received: limit,
                 max: self.max,
-            }));
+            });
         }
 
         Ok(OffsetQuery::new(limit, offset.unwrap_or(0)))
     }
 }
 
-impl Newtype for PageRule {
-    const NAME: &'static str = "Page";
-    type Kind = PageErrorKind;
-}
-
-/// What is wrong with a page's limit.
+/// Why a [`PageRule`] refused a request's page.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PageErrorKind {
+#[non_exhaustive]
+pub enum InvalidPage {
     /// A limit of 0.
     ZeroLimit,
     /// A limit above the rule's max.
     AboveMax { received: u32, max: u32 },
 }
 
-impl fmt::Display for PageErrorKind {
+impl fmt::Display for InvalidPage {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::ZeroLimit => write!(f, "limit can't be 0"),
+            Self::ZeroLimit => write!(f, "Page limit can't be 0"),
             Self::AboveMax { received, max } => {
-                write!(f, "limit can't exceed {max}, received: {received}")
+                write!(f, "Page limit can't exceed {max}, received: {received}")
             }
         }
     }
 }
+
+impl Error for InvalidPage {}
 
 #[cfg(test)]
 mod tests {
@@ -134,7 +131,7 @@ mod tests {
     fn a_zero_limit_is_rejected() {
         assert!(let Err(error) = RULE.offset_query(Some(0), None));
 
-        check!(error.kind() == &PageErrorKind::ZeroLimit);
+        check!(error == InvalidPage::ZeroLimit);
         check!(error.to_string() == "Page limit can't be 0");
     }
 
@@ -143,8 +140,8 @@ mod tests {
         assert!(let Err(error) = RULE.offset_query(Some(101), Some(3)));
 
         check!(
-            error.kind()
-                == &PageErrorKind::AboveMax {
+            error
+                == InvalidPage::AboveMax {
                     received: 101,
                     max: 100
                 }
