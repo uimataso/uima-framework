@@ -27,7 +27,7 @@ use tracing_subscriber::{Layer, Registry};
 /// let logs = LogCapture::start();
 /// tracing::warn!(user_uid = "u-1", "retrying later");
 ///
-/// assert!(logs.contains(Level::WARN, "retrying"));
+/// assert!(logs.has_message(Level::WARN, "retrying"));
 /// assert_eq!(logs.events()[0].fields["user_uid"], "u-1");
 /// assert!(!logs.mentions("secret"));
 /// ```
@@ -57,7 +57,7 @@ impl LogCapture {
     }
 
     /// Whether an event at `level` has `text` in its message.
-    pub fn contains(&self, level: Level, text: &str) -> bool {
+    pub fn has_message(&self, level: Level, text: &str) -> bool {
         self.count(level, text) > 0
     }
 
@@ -273,15 +273,15 @@ mod tests {
     }
 
     #[test]
-    fn contains_and_count_match_the_level_and_part_of_the_message() {
+    fn has_message_and_count_match_the_level_and_part_of_the_message() {
         let logs = LogCapture::start();
         tracing::info!("job 1 left queued");
         tracing::info!("job 2 left queued");
         tracing::warn!("job 3 left queued");
 
-        check!(logs.contains(Level::WARN, "left queued"));
-        check!(!logs.contains(Level::ERROR, "left queued"));
-        check!(!logs.contains(Level::INFO, "retrying"));
+        check!(logs.has_message(Level::WARN, "left queued"));
+        check!(!logs.has_message(Level::ERROR, "left queued"));
+        check!(!logs.has_message(Level::INFO, "retrying"));
         check!(logs.count(Level::INFO, "left queued") == 2);
         check!(logs.count(Level::DEBUG, "left queued") == 0);
     }
@@ -378,6 +378,6 @@ mod tests {
             .await
             .unwrap();
 
-        check!(logs.contains(Level::INFO, "in a task"));
+        check!(logs.has_message(Level::INFO, "in a task"));
     }
 }

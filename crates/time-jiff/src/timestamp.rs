@@ -2,7 +2,8 @@ use std::time::Duration;
 
 use jiff::Timestamp;
 
-/// The [`Duration`] between two timestamps, named after [`std::time::Instant`]'s methods.
+/// The [`Duration`] between two timestamps. The `_since` methods are named after
+/// [`std::time::Instant`]'s.
 pub trait TimestampExt {
     /// How long after `earlier` this is, or `None` when it's before `earlier`.
     fn checked_duration_since(self, earlier: Timestamp) -> Option<Duration>;
@@ -11,7 +12,7 @@ pub trait TimestampExt {
     fn saturating_duration_since(self, earlier: Timestamp) -> Duration;
 
     /// How far apart this and `other` are, in either order.
-    fn abs_duration_since(self, other: Timestamp) -> Duration;
+    fn duration_between(self, other: Timestamp) -> Duration;
 }
 
 impl TimestampExt for Timestamp {
@@ -23,7 +24,7 @@ impl TimestampExt for Timestamp {
         self.checked_duration_since(earlier).unwrap_or_default()
     }
 
-    fn abs_duration_since(self, other: Timestamp) -> Duration {
+    fn duration_between(self, other: Timestamp) -> Duration {
         self.duration_since(other).unsigned_abs()
     }
 }
@@ -47,14 +48,14 @@ mod tests {
 
         check!(later.checked_duration_since(earlier) == Some(Duration::from_millis(1500)));
         check!(later.saturating_duration_since(earlier) == Duration::from_millis(1500));
-        check!(later.abs_duration_since(earlier) == Duration::from_millis(1500));
+        check!(later.duration_between(earlier) == Duration::from_millis(1500));
     }
 
     #[test]
     fn the_same_timestamp_is_zero() {
         check!(at(5).checked_duration_since(at(5)) == Some(Duration::ZERO));
         check!(at(5).saturating_duration_since(at(5)) == Duration::ZERO);
-        check!(at(5).abs_duration_since(at(5)) == Duration::ZERO);
+        check!(at(5).duration_between(at(5)) == Duration::ZERO);
     }
 
     #[test]
@@ -64,7 +65,7 @@ mod tests {
 
         check!(earlier.checked_duration_since(later) == None);
         check!(earlier.saturating_duration_since(later) == Duration::ZERO);
-        check!(earlier.abs_duration_since(later) == NANO);
+        check!(earlier.duration_between(later) == NANO);
     }
 
     #[test]
@@ -72,7 +73,7 @@ mod tests {
         let span = Timestamp::MAX.duration_since(Timestamp::MIN).unsigned_abs();
 
         check!(Timestamp::MAX.checked_duration_since(Timestamp::MIN) == Some(span));
-        check!(Timestamp::MIN.abs_duration_since(Timestamp::MAX) == span);
+        check!(Timestamp::MIN.duration_between(Timestamp::MAX) == span);
         check!(Timestamp::MIN.saturating_duration_since(Timestamp::MAX) == Duration::ZERO);
     }
 }
