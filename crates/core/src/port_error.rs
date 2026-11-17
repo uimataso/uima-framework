@@ -298,7 +298,9 @@ mod tests {
 
     #[test]
     fn failure_context_keeps_a_port_failures_kind() {
-        let result: PortResult<()> = Err(Failure::new(FailureKind::Timeout, with_context()).into());
+        let failure = Failure::new(FailureKind::Timeout, with_context())
+            .with_retry_after(Some(Duration::from_secs(4)));
+        let result: PortResult<()> = Err(failure.into());
         let failure = result
             .failure_context("failed to list the groups")
             .unwrap_err();
@@ -306,6 +308,7 @@ mod tests {
         let source = failure.source().map(ToString::to_string);
         check!(source.as_deref() == Some("couldn't insert the group"));
         check!(failure.kind() == FailureKind::Timeout);
+        check!(failure.retry_after() == Some(Duration::from_secs(4)));
     }
 
     #[test]
