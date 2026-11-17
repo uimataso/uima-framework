@@ -2,7 +2,7 @@
 //! [`CountedPage`] holds what the read returns.
 
 /// Which rows of a list to read: `limit` rows from `offset`. Only
-/// [`PageRule::offset`](crate::PageRule::offset) makes one.
+/// [`PageRule::offset_query`](crate::PageRule::offset_query) makes one.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct OffsetQuery {
     limit: u32,
@@ -49,7 +49,7 @@ impl<T> OffsetPage<T> {
     ///
     /// const LOG_PAGE: PageRule = PageRule::new(2, 50);
     ///
-    /// let query = LOG_PAGE.offset(None, None).unwrap();
+    /// let query = LOG_PAGE.offset_query(None, None).unwrap();
     /// // a read with `LIMIT query.fetch_limit()`, which is 3
     /// let rows = vec!["a", "b", "c"];
     ///
@@ -119,7 +119,7 @@ mod tests {
 
     fn query(limit: u32, offset: u32) -> OffsetQuery {
         PageRule::new(20, 100)
-            .offset(Some(limit), Some(offset))
+            .offset_query(Some(limit), Some(offset))
             .unwrap()
     }
 
@@ -128,7 +128,7 @@ mod tests {
         let largest = PageRule::new(u32::MAX - 1, u32::MAX - 1);
 
         check!(query(1, 0).fetch_limit() == 2_u32);
-        check!(largest.offset(None, None).unwrap().fetch_limit() == u32::MAX);
+        check!(largest.offset_query(None, None).unwrap().fetch_limit() == u32::MAX);
     }
 
     #[test]

@@ -17,9 +17,9 @@ use crate::{Invalid, Newtype};
 ///
 /// const EVENT_PAGE: PageRule = PageRule::new(20, 100);
 ///
-/// let query = EVENT_PAGE.offset(None, Some(40)).unwrap();
+/// let query = EVENT_PAGE.offset_query(None, Some(40)).unwrap();
 /// assert_eq!((query.limit(), query.offset()), (20, 40));
-/// assert!(EVENT_PAGE.offset(Some(101), None).is_err());
+/// assert!(EVENT_PAGE.offset_query(Some(101), None).is_err());
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PageRule {
@@ -56,7 +56,7 @@ impl PageRule {
     /// 0.
     ///
     /// Fails when `limit` is 0 or above the max.
-    pub fn offset(
+    pub fn offset_query(
         &self,
         limit: Option<u32>,
         offset: Option<u32>,
@@ -111,12 +111,12 @@ mod tests {
     const RULE: PageRule = PageRule::new(20, 100);
 
     fn query(limit: u32, offset: u32) -> OffsetQuery {
-        RULE.offset(Some(limit), Some(offset)).unwrap()
+        RULE.offset_query(Some(limit), Some(offset)).unwrap()
     }
 
     #[test]
     fn a_missing_limit_and_offset_take_the_default_and_zero() {
-        let query = RULE.offset(None, None).unwrap();
+        let query = RULE.offset_query(None, None).unwrap();
 
         check!(query.limit() == 20);
         check!(query.offset() == 0);
@@ -132,7 +132,7 @@ mod tests {
 
     #[test]
     fn a_zero_limit_is_rejected() {
-        assert!(let Err(error) = RULE.offset(Some(0), None));
+        assert!(let Err(error) = RULE.offset_query(Some(0), None));
 
         check!(error.kind() == &PageErrorKind::ZeroLimit);
         check!(error.to_string() == "Page limit can't be 0");
@@ -140,7 +140,7 @@ mod tests {
 
     #[test]
     fn a_limit_above_max_is_rejected() {
-        assert!(let Err(error) = RULE.offset(Some(101), Some(3)));
+        assert!(let Err(error) = RULE.offset_query(Some(101), Some(3)));
 
         check!(
             error.kind()
@@ -155,13 +155,13 @@ mod tests {
     #[test]
     #[should_panic(expected = "default limit must be from 1 to its max")]
     fn a_rule_with_a_zero_default_panics() {
-        let _ = PageRule::new(0, 100).offset(Some(5), None);
+        let _ = PageRule::new(0, 100).offset_query(Some(5), None);
     }
 
     #[test]
     #[should_panic(expected = "default limit must be from 1 to its max")]
     fn a_rule_with_a_default_above_max_panics() {
-        let _ = PageRule::new(101, 100).offset(Some(5), None);
+        let _ = PageRule::new(101, 100).offset_query(Some(5), None);
     }
 
     #[test]
@@ -171,12 +171,18 @@ mod tests {
 
     #[test]
     fn a_rule_whose_default_is_its_max_is_fine() {
-        check!(PageRule::new(5, 5).offset(None, None).unwrap().limit() == 5);
+        check!(
+            PageRule::new(5, 5)
+                .offset_query(None, None)
+                .unwrap()
+                .limit()
+                == 5
+        );
     }
 
     #[test]
     #[should_panic(expected = "max must be below u32::MAX")]
     fn a_rule_with_a_max_of_u32_max_panics() {
-        let _ = PageRule::new(1, u32::MAX).offset(None, None);
+        let _ = PageRule::new(1, u32::MAX).offset_query(None, None);
     }
 }
