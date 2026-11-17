@@ -33,6 +33,7 @@ url = "2"
 testcontainers = { version = "0.28", optional = true }
 
 [dev-dependencies]
+proptest = { workspace = true }
 tokio = { workspace = true, features = [
   "io-util",
   "macros",

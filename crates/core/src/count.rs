@@ -472,117 +472,133 @@ mod props {
         ($mod:ident, $count:ident) => {
             mod $mod {
                 use proptest::prelude::*;
+                use proptest::property_test;
 
                 use super::*;
 
-                proptest! {
-                    #[test]
-                    fn new_accepts_exactly_up_to_max(n in value($count::MAX)) {
-                        match $count::new(n) {
-                            Ok(count) => {
-                                prop_assert!(n <= $count::MAX);
-                                prop_assert_eq!(count.get(), n);
+                #[property_test]
+                fn new_accepts_exactly_up_to_max(#[strategy = value($count::MAX)] n: u64) {
+                    match $count::new(n) {
+                        Ok(count) => {
+                            prop_assert!(n <= $count::MAX);
+                            prop_assert_eq!(count.get(), n);
+                        }
+                        Err(error) => prop_assert_eq!(
+                            error.into_kind(),
+                            CountErrorKind::AboveMax {
+                                received: n.into(),
+                                max: $count::MAX
                             }
-                            Err(error) => prop_assert_eq!(
-                                error.into_kind(),
-                                CountErrorKind::AboveMax { received: n.into(), max: $count::MAX }
-                            ),
-                        }
+                        ),
                     }
+                }
 
-                    #[test]
-                    fn round_trips_through_i64(n in signed($count::MAX)) {
-                        match $count::try_from(n) {
-                            Ok(count) => prop_assert_eq!(i64::from(count), n),
-                            Err(error) if n < 0 => prop_assert_eq!(
-                                error.into_kind(),
-                                CountErrorKind::Negative { received: n.into() }
-                            ),
-                            Err(error) => prop_assert_eq!(
-                                error.into_kind(),
-                                CountErrorKind::AboveMax { received: n as u128, max: $count::MAX }
-                            ),
-                        }
-                    }
-
-                    #[test]
-                    fn increment_adds_one_up_to_max(n in 0..=$count::MAX) {
-                        let count = $count::new(n).unwrap();
-                        prop_assert_eq!(count.saturating_increment().get(), (n + 1).min($count::MAX));
-                        match count.try_increment() {
-                            Ok(next) => prop_assert_eq!(next.get(), n + 1),
-                            Err(error) => {
-                                prop_assert_eq!(n, $count::MAX);
-                                prop_assert_eq!(
-                                    error.into_kind(),
-                                    CountErrorKind::AboveMax {
-                                        received: u128::from($count::MAX) + 1,
-                                        max: $count::MAX,
-                                    }
-                                );
+                #[property_test]
+                fn round_trips_through_i64(#[strategy = signed($count::MAX)] n: i64) {
+                    match $count::try_from(n) {
+                        Ok(count) => prop_assert_eq!(i64::from(count), n),
+                        Err(error) if n < 0 => prop_assert_eq!(
+                            error.into_kind(),
+                            CountErrorKind::Negative { received: n.into() }
+                        ),
+                        Err(error) => prop_assert_eq!(
+                            error.into_kind(),
+                            CountErrorKind::AboveMax {
+                                received: n as u128,
+                                max: $count::MAX
                             }
+                        ),
+                    }
+                }
+
+                #[property_test]
+                fn increment_adds_one_up_to_max(#[strategy = 0..=$count::MAX] n: u64) {
+                    let count = $count::new(n).unwrap();
+                    prop_assert_eq!(count.saturating_increment().get(), (n + 1).min($count::MAX));
+                    match count.try_increment() {
+                        Ok(next) => prop_assert_eq!(next.get(), n + 1),
+                        Err(error) => {
+                            prop_assert_eq!(n, $count::MAX);
+                            prop_assert_eq!(
+                                error.into_kind(),
+                                CountErrorKind::AboveMax {
+                                    received: u128::from($count::MAX) + 1,
+                                    max: $count::MAX,
+                                }
+                            );
                         }
                     }
+                }
 
-                    #[test]
-                    fn decrement_takes_one_down_to_zero(n in 0..=$count::MAX) {
-                        let count = $count::new(n).unwrap();
-                        prop_assert_eq!(count.saturating_decrement().get(), n.saturating_sub(1));
-                        match count.try_decrement() {
-                            Ok(previous) => prop_assert_eq!(previous.get(), n - 1),
-                            Err(error) => {
-                                prop_assert_eq!(n, 0);
-                                prop_assert_eq!(error.into_kind(), CountErrorKind::Negative { received: -1 });
+                #[property_test]
+                fn decrement_takes_one_down_to_zero(#[strategy = 0..=$count::MAX] n: u64) {
+                    let count = $count::new(n).unwrap();
+                    prop_assert_eq!(count.saturating_decrement().get(), n.saturating_sub(1));
+                    match count.try_decrement() {
+                        Ok(previous) => prop_assert_eq!(previous.get(), n - 1),
+                        Err(error) => {
+                            prop_assert_eq!(n, 0);
+                            prop_assert_eq!(
+                                error.into_kind(),
+                                CountErrorKind::Negative { received: -1 }
+                            );
+                        }
+                    }
+                }
+
+                #[property_test]
+                fn add_and_sub_match_the_wide_arithmetic(
+                    #[strategy = 0..=$count::MAX] n: u64,
+                    #[strategy = value($count::MAX)] by: u64,
+                ) {
+                    let count = $count::new(n).unwrap();
+                    let sum = u128::from(n) + u128::from(by);
+                    let difference = i128::from(n) - i128::from(by);
+                    let max = u128::from($count::MAX);
+                    prop_assert_eq!(u128::from(count.saturating_add(by).get()), sum.min(max));
+                    prop_assert_eq!(
+                        i128::from(count.saturating_sub(by).get()),
+                        difference.max(0)
+                    );
+                    match count.try_add(by) {
+                        Ok(next) => prop_assert_eq!(u128::from(next.get()), sum),
+                        Err(error) => prop_assert_eq!(
+                            error.into_kind(),
+                            CountErrorKind::AboveMax {
+                                received: sum,
+                                max: $count::MAX
                             }
-                        }
+                        ),
                     }
+                    prop_assert_eq!(count.try_add(by).is_ok(), sum <= max);
+                    match count.try_sub(by) {
+                        Ok(previous) => prop_assert_eq!(i128::from(previous.get()), difference),
+                        Err(error) => prop_assert_eq!(
+                            error.into_kind(),
+                            CountErrorKind::Negative {
+                                received: difference
+                            }
+                        ),
+                    }
+                    prop_assert_eq!(count.try_sub(by).is_ok(), difference >= 0);
+                }
 
-                    #[test]
-                    fn add_and_sub_match_the_wide_arithmetic(
-                        n in 0..=$count::MAX,
-                        by in value($count::MAX),
-                    ) {
-                        let count = $count::new(n).unwrap();
-                        let sum = u128::from(n) + u128::from(by);
-                        let difference = i128::from(n) - i128::from(by);
-                        let max = u128::from($count::MAX);
-                        prop_assert_eq!(u128::from(count.saturating_add(by).get()), sum.min(max));
-                        prop_assert_eq!(i128::from(count.saturating_sub(by).get()), difference.max(0));
-                        match count.try_add(by) {
-                            Ok(next) => prop_assert_eq!(u128::from(next.get()), sum),
-                            Err(error) => prop_assert_eq!(
-                                error.into_kind(),
-                                CountErrorKind::AboveMax { received: sum, max: $count::MAX }
-                            ),
-                        }
-                        prop_assert_eq!(count.try_add(by).is_ok(), sum <= max);
-                        match count.try_sub(by) {
-                            Ok(previous) => prop_assert_eq!(i128::from(previous.get()), difference),
-                            Err(error) => prop_assert_eq!(
-                                error.into_kind(),
-                                CountErrorKind::Negative { received: difference }
-                            ),
-                        }
-                        prop_assert_eq!(count.try_sub(by).is_ok(), difference >= 0);
-                    }
+                #[property_test]
+                fn remaining_and_get_add_up_to_max(#[strategy = 0..=$count::MAX] n: u64) {
+                    let count = $count::new(n).unwrap();
+                    prop_assert_eq!(count.get() + count.remaining(), $count::MAX);
+                    prop_assert_eq!(count.is_zero(), n == 0);
+                    prop_assert_eq!(count == $count::ZERO, n == 0);
+                }
 
-                    #[test]
-                    fn remaining_and_get_add_up_to_max(n in 0..=$count::MAX) {
-                        let count = $count::new(n).unwrap();
-                        prop_assert_eq!(count.get() + count.remaining(), $count::MAX);
-                        prop_assert_eq!(count.is_zero(), n == 0);
-                        prop_assert_eq!(count == $count::ZERO, n == 0);
-                    }
-
-                    #[test]
-                    fn orders_and_displays_as_the_number(
-                        a in 0..=$count::MAX,
-                        b in 0..=$count::MAX,
-                    ) {
-                        let (x, y) = ($count::new(a).unwrap(), $count::new(b).unwrap());
-                        prop_assert_eq!(x.cmp(&y), a.cmp(&b));
-                        prop_assert_eq!(x.to_string(), a.to_string());
-                    }
+                #[property_test]
+                fn orders_and_displays_as_the_number(
+                    #[strategy = 0..=$count::MAX] a: u64,
+                    #[strategy = 0..=$count::MAX] b: u64,
+                ) {
+                    let (x, y) = ($count::new(a).unwrap(), $count::new(b).unwrap());
+                    prop_assert_eq!(x.cmp(&y), a.cmp(&b));
+                    prop_assert_eq!(x.to_string(), a.to_string());
                 }
             }
         };

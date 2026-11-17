@@ -155,3 +155,83 @@ mod tests {
         check!(!error.to_string().contains("hunter2"));
     }
 }
+
+#[cfg(test)]
+mod props {
+    use jiff::SignedDuration;
+    use proptest::prelude::*;
+    use proptest::property_test;
+
+    use super::*;
+
+    /// The longest length a span holds, in seconds.
+    const MAX_SECS: u64 = 631_107_417_600;
+
+    /// Any length a span holds, often zero, the longest or a whole number of seconds.
+    fn duration() -> impl Strategy<Value = Duration> {
+        prop_oneof![
+            Just(Duration::ZERO),
+            Just(Duration::from_secs(MAX_SECS)),
+            (0..=MAX_SECS).prop_map(Duration::from_secs),
+            (0..MAX_SECS, 0..1_000_000_000_u32)
+                .prop_map(|(secs, nanos)| Duration::new(secs, nanos)),
+        ]
+    }
+
+    /// Up to 2 whitespace characters.
+    fn whitespace() -> impl Strategy<Value = String> {
+        prop::collection::vec(prop_oneof![Just(' '), Just('\t'), Just('\n')], 0..3)
+            .prop_map(|chars| chars.into_iter().collect())
+    }
+
+    /// The length in jiff's ISO 8601 and friendly formats.
+    fn written(duration: SignedDuration) -> [String; 2] {
+        [format!("{duration}"), format!("{duration:#}")]
+    }
+
+    #[property_test]
+    fn reads_back_a_written_length(
+        #[strategy = duration()] duration: Duration,
+        #[strategy = whitespace()] before: String,
+        #[strategy = whitespace()] after: String,
+    ) {
+        for written in written(SignedDuration::try_from(duration).unwrap()) {
+            let padded = format!("{before}{written}{after}");
+            prop_assert_eq!(parse_duration(&padded), Ok(duration), "{:?}", padded);
+        }
+    }
+
+    #[property_test]
+    fn refuses_a_negative_length(
+        #[strategy = duration().prop_filter("not zero", |d| !d.is_zero())] duration: Duration,
+    ) {
+        for written in written(-SignedDuration::try_from(duration).unwrap()) {
+            prop_assert_eq!(
+                parse_duration(&written),
+                Err(InvalidDuration::Negative),
+                "{}",
+                written
+            );
+        }
+    }
+
+    #[property_test]
+    fn refuses_months_and_years(
+        #[strategy = 1..=1000_u32] n: u32,
+        #[strategy = prop_oneof![Just("mo"), Just("y")]] unit: &'static str,
+        #[strategy = 0..=30_u32] days: u32,
+    ) {
+        let written = format!("{n}{unit} {days}d");
+        prop_assert_eq!(
+            parse_duration(&written),
+            Err(InvalidDuration::Calendar),
+            "{}",
+            written
+        );
+    }
+
+    #[property_test]
+    fn never_panics(s: String) {
+        let _ = parse_duration(&s);
+    }
+}

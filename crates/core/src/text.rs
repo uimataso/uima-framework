@@ -662,6 +662,7 @@ mod tests {
 )]
 mod props {
     use proptest::prelude::*;
+    use proptest::property_test;
 
     use super::*;
 
@@ -707,18 +708,20 @@ mod props {
         }
     }
 
-    proptest! {
-        #[test]
-        fn text_checks_the_trimmed_text(raw in text()) {
-            let got = Name::new(&raw).map(Name::into_string).map_err(|e| e.into_kind());
-            prop_assert_eq!(got, expected(raw.trim()));
-        }
+    #[property_test]
+    fn text_checks_the_trimmed_text(#[strategy = text()] raw: String) {
+        let got = Name::new(&raw)
+            .map(Name::into_string)
+            .map_err(|e| e.into_kind());
+        prop_assert_eq!(got, expected(raw.trim()));
+    }
 
-        #[test]
-        fn secret_checks_like_text_without_the_value(raw in text()) {
-            let got = Token::new(&raw).map(Token::into_string).map_err(|e| e.into_kind());
-            prop_assert_eq!(got, expected(&raw).map_err(SecretErrorKind::from));
-        }
+    #[property_test]
+    fn secret_checks_like_text_without_the_value(#[strategy = text()] raw: String) {
+        let got = Token::new(&raw)
+            .map(Token::into_string)
+            .map_err(|e| e.into_kind());
+        prop_assert_eq!(got, expected(&raw).map_err(SecretErrorKind::from));
     }
 }
 

@@ -382,3 +382,49 @@ mod tests {
         }
     }
 }
+
+#[cfg(test)]
+mod props {
+    use proptest::prelude::*;
+    use proptest::property_test;
+
+    use super::*;
+
+    /// Up to 3 characters, often ones a URL reads as a delimiter, as an unencoded password has.
+    fn delimiters() -> impl Strategy<Value = String> {
+        prop::collection::vec(
+            prop_oneof![
+                Just('?'),
+                Just('#'),
+                Just('@'),
+                Just('/'),
+                Just(':'),
+                Just('%'),
+                Just('&'),
+                Just('='),
+                Just(' '),
+                Just('['),
+                any::<char>()
+            ],
+            0..4,
+        )
+        .prop_map(|chars| chars.into_iter().collect())
+    }
+
+    #[property_test]
+    fn never_shows_the_password(
+        #[strategy = delimiters()] before: String,
+        #[strategy = delimiters()] after: String,
+        #[strategy = prop_oneof![Just(""), Just("/"), Just("?sslmode=require"), Just("/app")]]
+        rest: &'static str,
+    ) {
+        // Lowercase, so it reads the same if the URL takes it for the host.
+        let url = format!("postgres://app:{before}s3cr3t{after}@db:5432{rest}");
+
+        let shown = match url.parse::<PostgresUrl>() {
+            Ok(url) => format!("{url} {url:?}"),
+            Err(error) => format!("{error} {error:?}"),
+        };
+        prop_assert!(!shown.contains("s3cr3t"), "{}", shown);
+    }
+}
