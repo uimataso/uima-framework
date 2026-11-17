@@ -10,14 +10,14 @@ authors.workspace = true
 testing = ["dep:uima-testing"]
 
 [dependencies]
-# local crates
-uima-testing = { workspace = true, optional = true }
-
 # workspace dependencies
 anyhow = { workspace = true }
 
 # crate-local dependencies
 uuid = { version = "1", features = ["v7"] }
+
+# testing-only, behind the `testing` feature
+uima-testing = { workspace = true, optional = true }
 
 [dev-dependencies]
 proptest = { workspace = true }

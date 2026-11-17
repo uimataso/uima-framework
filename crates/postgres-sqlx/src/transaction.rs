@@ -23,7 +23,7 @@ impl PgTransaction {
 }
 
 impl HasUnitOfWork for Postgres {
-    type UoW = PgTransaction;
+    type Uow = PgTransaction;
 
     async fn begin(&self) -> Result<PgTransaction, Failure> {
         let tx = self.pool.begin().await.map_err(failure)?;

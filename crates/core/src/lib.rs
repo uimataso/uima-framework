@@ -1,4 +1,4 @@
-//! Value types my services share.
+//! Types and ports my services share.
 //!
 //! # Examples
 //!
@@ -37,7 +37,7 @@
 //!
 //! # Features
 //!
-//! - `testing`: adds `unit_of_work::contract`, the cases every unit of work passes.
+//! - `testing`: adds `unit_of_work::contract`, the cases a unit of work passes.
 
 mod count;
 mod invalid;

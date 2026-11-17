@@ -77,7 +77,7 @@ pub mod contract {
     pub async fn run_all<C>(isolated: impl AsyncFn() -> C)
     where
         C: HasUnitOfWork + HasUserRepo,
-        C::UoW: HasUserRepo,
+        C::Uow: HasUserRepo,
     {
         run_case(&isolated, create_then_get_roundtrips).await;
         // ...
