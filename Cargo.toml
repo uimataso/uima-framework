@@ -23,13 +23,17 @@ todo = "warn"
 uima-cancel = { path = "./crates/cancel", version = "0.0.0" }
 uima-config = { path = "./crates/config", version = "0.0.0" }
 uima-core = { path = "./crates/core", version = "0.0.0" }
+uima-log-tracing = { path = "./crates/log-tracing", version = "0.0.0" }
 uima-port-macro = { path = "./crates/port-macro", version = "0.0.0" }
 uima-testing = { path = "./crates/testing", version = "0.0.0" }
 uima-time-jiff = { path = "./crates/time-jiff", version = "0.0.0" }
 
 # workspace dependencies
 anyhow = "1"
+axum = { version = "0.8", default-features = false }
 tokio = { version = "1", default-features = false }
+tower = { version = "0.5", default-features = false }
+tower-http = { version = "0.7", default-features = false }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", default-features = false }
 
