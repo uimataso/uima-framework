@@ -67,6 +67,9 @@ impl PostgresClient {
     /// Connects, creating the database when it doesn't exist. Fails for a config value its
     /// field's doc doesn't allow.
     ///
+    /// Checking the database, creating it and opening the pool each give up after
+    /// `acquire_timeout`, so connecting can take up to three times it.
+    ///
     /// Connect directly or through a pooler in session mode. A pooler in transaction mode drops
     /// `lock_timeout` and the migration lock with each transaction.
     pub async fn connect(target: &PostgresTarget, config: &PostgresConfig) -> anyhow::Result<Self> {
@@ -227,7 +230,7 @@ async fn within<T>(
     tokio::time::timeout(timeout, work).await.map_err(|_| {
         sqlx::Error::Io(io::Error::new(
             io::ErrorKind::TimedOut,
-            "the server didn't answer within the acquire timeout",
+            "the server didn't finish within the acquire timeout",
         ))
     })?
 }
