@@ -19,7 +19,11 @@ tower-http = { workspace = true, features = [
 ] }
 tracing = { workspace = true }
 
+# crate-local dependencies
+subtle = "2"
+
 [dev-dependencies]
+proptest = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt"] }
 tower = { workspace = true, features = ["util"] }
 uima-log-tracing = { workspace = true, features = ["testing"] }

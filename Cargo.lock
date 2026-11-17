@@ -2918,6 +2918,8 @@ name = "uima-http-axum"
 version = "0.0.0"
 dependencies = [
  "axum",
+ "proptest",
+ "subtle",
  "tokio",
  "tower",
  "tower-http",

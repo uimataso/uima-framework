@@ -1,29 +1,37 @@
-//! Layers every axum service puts around its routes: request tracing, refusing cross-site form
-//! posts, and refusing requests that bypass the proxy in front.
+//! The layers an axum service puts around its routes.
 //!
 //! # Examples
 //!
 //! ```
 //! use axum::Router;
 //! use axum::routing::get;
-//! use uima_core::Secret;
-//! use uima_http_axum::{OriginAuth, SameOrigin, Trace};
+//! use tower::ServiceBuilder;
+//! use uima_http_axum::{OriginAuth, OriginSecret, SameOrigin, Trace};
 //!
-//! let secret = Some(Secret::new("from-the-env".to_owned()));
-//! let router: Router = Router::new().route("/", get(|| async { "hi" }));
-//! let router = SameOrigin::new().layer(router);
-//! let router = OriginAuth::new(secret).exempt(["/healthz"]).layer(router);
-//! let router = Trace::new().layer(router);
+//! let secret = OriginSecret::new("from-the-env-at-least-32-characters").unwrap();
+//! let router: Router = Router::new().route("/", get(|| async { "hi" })).layer(
+//!     ServiceBuilder::new()
+//!         .layer(Trace::new())
+//!         .layer(OriginAuth::new(Some(secret)).exempt(["/healthz"]))
+//!         .layer(SameOrigin::new()),
+//! );
 //! ```
 //!
-//! Each `layer` wraps the routes the router has so far, so call it after adding them. The last
-//! layer is the outermost and sees a request first: put [`Trace`] last, so every request is
-//! logged, refused ones included.
+//! In a `ServiceBuilder` the first layer is the outermost and sees a request first, so put
+//! [`Trace`] first to log every request, refused ones included. `Router::layer` wraps the routes
+//! the router has so far, so call it after adding them.
+
+use std::pin::Pin;
 
 mod origin_auth;
 mod same_origin;
 mod trace;
 
-pub use origin_auth::OriginAuth;
-pub use same_origin::SameOrigin;
-pub use trace::Trace;
+#[cfg(test)]
+mod tests;
+
+pub use origin_auth::{OriginAuth, OriginAuthService, OriginSecret};
+pub use same_origin::{SameOrigin, SameOriginService};
+pub use trace::{Trace, TraceService};
+
+type BoxFuture<T> = Pin<Box<dyn Future<Output = T> + Send>>;

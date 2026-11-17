@@ -2,24 +2,28 @@
 
 use std::fmt;
 use std::sync::Arc;
+use std::task::{Context, Poll};
 
-use axum::Router;
-use axum::extract::Request;
-use axum::http::StatusCode;
-use axum::middleware::{self, Next};
+use axum::http::{Request, StatusCode};
 use axum::response::{IntoResponse, Response};
+use tower::{Layer, Service};
 
-/// Refuses a request with an unsafe method, such as `POST` or `DELETE`, that another site's page
-/// sent, so that page can't act through the browser of someone who visits it (CSRF).
+use crate::BoxFuture;
+
+/// Refuses a request with an unsafe method, any but `GET`, `HEAD`, `OPTIONS` and `TRACE`, that
+/// another site's page sent, so that page can't act through the browser of someone who visits it
+/// (CSRF).
 ///
 /// A service needs it when a browser's requests are trusted by what they carry on their own, such
 /// as a cookie or the network they come from. A bearer token in `authorization` isn't one, since
-/// another site's page can't send it.
+/// the browser never adds it on its own. It checks where a request comes from, not that the host
+/// is the service's own, so a page that points its own domain at the service (DNS rebinding)
+/// passes.
 ///
 /// A request passes when its `sec-fetch-site` is `same-origin` or `none`, or, from a browser that
-/// doesn't send `sec-fetch-site`, when its `origin` names its own host. A request with neither
-/// header, such as one from `curl`, passes too. A refused request gets a bare `403`, or what
-/// [`refuse_with`](Self::refuse_with) returns.
+/// doesn't send `sec-fetch-site`, when its `origin` names its own host exactly. A request with
+/// neither header, such as one from `curl`, passes too. A refused request gets a bare `403`, or
+/// what [`refuse_with`](Self::refuse_with) returns.
 #[derive(Clone)]
 pub struct SameOrigin {
     refusal: Arc<dyn Fn() -> Response + Send + Sync>,
@@ -35,20 +39,6 @@ impl SameOrigin {
         Self {
             refusal: Arc::new(refusal),
         }
-    }
-
-    /// Wraps `router`'s routes and its fallback.
-    pub fn layer<S: Clone + Send + Sync + 'static>(self, router: Router<S>) -> Router<S> {
-        router.layer(middleware::from_fn(move |request: Request, next: Next| {
-            let refusal = (!request.method().is_safe() && !is_same_origin(&request))
-                .then(|| (self.refusal)());
-            async move {
-                match refusal {
-                    Some(refusal) => refusal,
-                    None => next.run(request).await,
-                }
-            }
-        }))
     }
 }
 
@@ -66,7 +56,57 @@ impl fmt::Debug for SameOrigin {
     }
 }
 
-fn is_same_origin(request: &Request) -> bool {
+impl<S> Layer<S> for SameOrigin {
+    type Service = SameOriginService<S>;
+
+    fn layer(&self, inner: S) -> Self::Service {
+        SameOriginService {
+            inner,
+            refusal: self.refusal.clone(),
+        }
+    }
+}
+
+/// The service [`SameOrigin`] wraps around another.
+#[derive(Clone)]
+pub struct SameOriginService<S> {
+    inner: S,
+    refusal: Arc<dyn Fn() -> Response + Send + Sync>,
+}
+
+impl<S: fmt::Debug> fmt::Debug for SameOriginService<S> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("SameOriginService")
+            .field("inner", &self.inner)
+            .finish_non_exhaustive()
+    }
+}
+
+impl<S, B> Service<Request<B>> for SameOriginService<S>
+where
+    S: Service<Request<B>>,
+    S::Response: IntoResponse,
+    S::Future: Send + 'static,
+{
+    type Response = Response;
+    type Error = S::Error;
+    type Future = BoxFuture<Result<Response, S::Error>>;
+
+    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        self.inner.poll_ready(cx)
+    }
+
+    fn call(&mut self, request: Request<B>) -> Self::Future {
+        if !request.method().is_safe() && !is_same_origin(&request) {
+            let refusal = (self.refusal)();
+            return Box::pin(async { Ok(refusal) });
+        }
+        let response = self.inner.call(request);
+        Box::pin(async { response.await.map(IntoResponse::into_response) })
+    }
+}
+
+fn is_same_origin<B>(request: &Request<B>) -> bool {
     let header = |name| {
         request
             .headers()
@@ -82,15 +122,14 @@ fn is_same_origin(request: &Request) -> bool {
     // HTTP/2 carries the host in the URI instead of a `host` header.
     let host = header("host").or_else(|| request.uri().authority().map(|a| a.as_str()));
     let origin_host = origin.split_once("://").map(|(_, host)| host);
-    origin_host
-        .zip(host)
-        .is_some_and(|(origin_host, host)| origin_host.eq_ignore_ascii_case(host))
+    origin_host.is_some_and(|origin_host| Some(origin_host) == host)
 }
 
 #[cfg(test)]
 mod tests {
+    use axum::Router;
     use axum::body::Body;
-    use axum::http::Method;
+    use axum::http::{Method, Version};
     use axum::routing::any;
     use tower::ServiceExt as _;
     use uima_testing::check;
@@ -114,20 +153,21 @@ mod tests {
                 false,
             ),
             (&[("origin", "http://t:8080"), ("host", "t:8080")], true),
-            (&[("origin", "https://T:8080"), ("host", "t:8080")], true),
+            (&[("origin", "https://T:8080"), ("host", "t:8080")], false),
             (&[("origin", "http://t:8080"), ("host", "t")], false),
             (&[("origin", "http://evil"), ("host", "t")], false),
             (&[("origin", "null"), ("host", "t")], false),
             (&[("origin", "http://t")], false),
             (&[], true),
         ];
+        let methods = ["POST", "PUT", "PATCH", "DELETE", "CONNECT", "PROPFIND"];
         for (headers, passes) in cases {
-            for method in [Method::POST, Method::PUT, Method::PATCH, Method::DELETE] {
-                let mut request = Request::builder().method(method.clone()).uri("/");
+            for method in methods {
+                let mut request = Request::builder().method(method).uri("/");
                 for (name, value) in *headers {
                     request = request.header(*name, *value);
                 }
-                let status = send(SameOrigin::new(), request).await;
+                let status = send(SameOrigin::new(), request).await.status();
                 check!(
                     (status == StatusCode::OK) == *passes,
                     "{method} {headers:?}"
@@ -138,25 +178,47 @@ mod tests {
 
     #[tokio::test]
     async fn safe_requests_pass_from_anywhere() {
-        for method in [Method::GET, Method::HEAD, Method::OPTIONS] {
+        for method in [Method::GET, Method::HEAD, Method::OPTIONS, Method::TRACE] {
             let request = Request::builder()
                 .method(method.clone())
                 .uri("/")
                 .header("sec-fetch-site", "cross-site");
             check!(
-                send(SameOrigin::new(), request).await == StatusCode::OK,
+                send(SameOrigin::new(), request).await.status() == StatusCode::OK,
                 "{method}"
             );
         }
     }
 
     #[tokio::test]
-    async fn the_host_can_come_from_the_uri() {
-        let request = Request::post("http://t:8080/").header("origin", "http://t:8080");
-        check!(send(SameOrigin::new(), request).await == StatusCode::OK);
+    async fn the_host_comes_from_the_uri_over_http2() {
+        // What hyper hands axum for an HTTP/2 request: the authority in the URI, no `host`.
+        let request = |origin| {
+            Request::post("http://t:8080/")
+                .version(Version::HTTP_2)
+                .header("origin", origin)
+        };
+        let status = send(SameOrigin::new(), request("http://t:8080"))
+            .await
+            .status();
+        check!(status == StatusCode::OK);
+        let status = send(SameOrigin::new(), request("http://evil"))
+            .await
+            .status();
+        check!(status == StatusCode::FORBIDDEN);
+    }
 
-        let request = Request::post("http://t:8080/").header("origin", "http://evil");
-        check!(send(SameOrigin::new(), request).await == StatusCode::FORBIDDEN);
+    #[tokio::test]
+    async fn a_refusal_is_a_bare_403_by_default() {
+        for uri in ["/", "/missing"] {
+            let request = Request::post(uri).header("sec-fetch-site", "cross-site");
+
+            let response = send(SameOrigin::new(), request).await;
+
+            check!(response.status() == StatusCode::FORBIDDEN, "{uri}");
+            let body = axum::body::to_bytes(response.into_body(), 1024).await;
+            check!(body.unwrap().is_empty(), "{uri}");
+        }
     }
 
     #[tokio::test]
@@ -164,12 +226,19 @@ mod tests {
         let same_origin =
             SameOrigin::new().refuse_with(|| (StatusCode::IM_A_TEAPOT, "go away").into_response());
         let request = Request::post("/").header("sec-fetch-site", "cross-site");
-        check!(send(same_origin, request).await == StatusCode::IM_A_TEAPOT);
+        check!(send(same_origin, request).await.status() == StatusCode::IM_A_TEAPOT);
     }
 
-    async fn send(same_origin: SameOrigin, request: axum::http::request::Builder) -> StatusCode {
-        let router = same_origin.layer(Router::new().route("/", any(|| async { "ok" })));
+    #[test]
+    fn debug_names_the_type() {
+        check!(format!("{:?}", SameOrigin::new()) == "SameOrigin { .. }");
+    }
+
+    async fn send(same_origin: SameOrigin, request: axum::http::request::Builder) -> Response {
+        let router = Router::new()
+            .route("/", any(|| async { "ok" }))
+            .layer(same_origin);
         let request = request.body(Body::empty()).unwrap();
-        router.oneshot(request).await.unwrap().status()
+        router.oneshot(request).await.unwrap()
     }
 }
