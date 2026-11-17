@@ -1,0 +1,5 @@
+error: `transparent` needs one unnamed field
+ --> tests/ui/transparent_on_unit.rs:7:5
+  |
+7 |     Gone,
+  |     ^^^^

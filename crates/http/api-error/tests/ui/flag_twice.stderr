@@ -1,0 +1,5 @@
+error: `no_data` is given twice
+ --> tests/ui/flag_twice.rs:6:20
+  |
+6 |     #[api(no_data, no_data)]
+  |                    ^^^^^^^

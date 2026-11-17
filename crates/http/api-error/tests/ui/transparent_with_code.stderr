@@ -1,0 +1,5 @@
+error: `transparent` takes no other `api` attribute
+ --> tests/ui/transparent_with_code.rs:7:5
+  |
+7 |     Framework(Error),
+  |     ^^^^^^^^^

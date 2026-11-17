@@ -1,0 +1,5 @@
+error: `api` goes on the variant, not on a field
+ --> tests/ui/attribute_on_field.rs:6:11
+  |
+6 |     Token(#[api(no_data)] String),
+  |           ^

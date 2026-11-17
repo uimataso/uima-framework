@@ -1,0 +1,5 @@
+error: an error's status is 400 to 599
+ --> tests/ui/status_too_low.rs:6:20
+  |
+6 |     #[api(status = 399)]
+  |                    ^^^
