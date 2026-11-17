@@ -20,28 +20,6 @@
 //! A timestamp plus or minus a `Duration` is jiff's own; [`TimestampExt`] gives the `Duration`
 //! between two timestamps.
 //!
-//! # Clock
-//!
-//! The app reads the current time from a [`Clock`] in its context, so a test can set it with a
-//! `testing::SimulatedClock`.
-//!
-//! ```
-//! use uima_time_jiff::jiff::Timestamp;
-//! use uima_time_jiff::{Clock as _, HasClock, SystemClock};
-//!
-//! #[derive(uima_port_macro::HasPort)]
-//! struct Ctx {
-//!     #[has_port(Clock)]
-//!     clock: SystemClock,
-//! }
-//!
-//! fn stamp(ctx: &impl HasClock) -> Timestamp {
-//!     ctx.clock().now()
-//! }
-//!
-//! assert!(stamp(&Ctx { clock: SystemClock }) <= Timestamp::now());
-//! ```
-//!
 //! # Features
 //!
 //! - `testing`: adds the `testing` module.

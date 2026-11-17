@@ -2,6 +2,26 @@ use jiff::{RoundMode, Timestamp, TimestampRound, Unit};
 
 /// Where the app gets the current time.
 ///
+/// The app reads it from its context, so a test can set the time with a
+/// `testing::SimulatedClock`.
+///
+/// ```
+/// use uima_time_jiff::jiff::Timestamp;
+/// use uima_time_jiff::{Clock as _, HasClock, SystemClock};
+///
+/// #[derive(uima_port_macro::HasPort)]
+/// struct Ctx {
+///     #[has_port(Clock)]
+///     clock: SystemClock,
+/// }
+///
+/// fn stamp(ctx: &impl HasClock) -> Timestamp {
+///     ctx.clock().now()
+/// }
+///
+/// assert!(stamp(&Ctx { clock: SystemClock }) <= Timestamp::now());
+/// ```
+///
 /// `now` is to the microsecond, the precision Postgres stores, so a time saved and read back is
 /// equal to the one the app has.
 #[uima_port_macro::has_port]

@@ -14,10 +14,6 @@
 //! );
 //! # }
 //! ```
-//!
-//! # Timeouts
-//!
-//! [`TimeoutExt::timeout`] puts a time limit on a future.
 
 mod signal;
 mod timeout;

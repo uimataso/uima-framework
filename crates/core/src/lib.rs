@@ -29,11 +29,6 @@
 //! Don't derive `Default`, or `Deserialize` without `try_from`, since both make a value the
 //! checks never saw.
 //!
-//! # Secrets
-//!
-//! [`Secret`] wraps a value that must stay out of logs, such as a URL holding a password. For a
-//! secret string with rules, [`secret!`] defines a newtype instead.
-//!
 //! # Lists
 //!
 //! A [`PageRule`] turns a request's limit and offset into an [`OffsetQuery`]; a read returns an

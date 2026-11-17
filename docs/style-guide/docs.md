@@ -20,8 +20,8 @@ first.
 - Reread the doc before finishing and cut whatever the caller doesn't need.
 
 A crate's `lib.rs` doc follows the same idea, with one short sentence of what the crate is for, then
-`# Examples` with its common use, a section for each topic the example doesn't show, and
-`# Features` listing what each feature adds.
+`# Examples` with its common use and `# Features` listing what each feature adds. It adds a section
+only for what no single item holds, such as a rule shared by several items or how they fit together.
 A public module's doc has the same shape, without `# Features`.
 
 ```rust

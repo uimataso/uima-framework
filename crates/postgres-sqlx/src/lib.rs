@@ -21,16 +21,6 @@
 //! # }
 //! ```
 //!
-//! # TLS
-//!
-//! A server across a network takes `?sslmode=verify-full`, since the default, `prefer`, doesn't
-//! check the server's certificate and falls back to no TLS.
-//!
-//! # Environment
-//!
-//! sqlx fills what the URL leaves out from the `PG*` variables, such as `PGSSLMODE`, `PGPASSWORD`
-//! or `PGOPTIONS`, and from `~/.pgpass`, so set them only when the URL should take them.
-//!
 //! # Features
 //!
 //! - `testing`: adds the `testing` module, with `TestPostgres` for a database per test case.

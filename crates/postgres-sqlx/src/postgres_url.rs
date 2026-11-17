@@ -13,6 +13,12 @@ use crate::DatabaseName;
 /// A Postgres server's URL, `postgres://user:password@host:port`, without a database.
 ///
 /// `Debug` and `Display` show it with the password masked, so it can be logged.
+///
+/// A server across a network takes `?sslmode=verify-full`, since the default, `prefer`, doesn't
+/// check the server's certificate and falls back to no TLS.
+///
+/// sqlx fills what the URL leaves out from the `PG*` variables, such as `PGSSLMODE`, `PGPASSWORD`
+/// or `PGOPTIONS`, and from `~/.pgpass`, so set them only when the URL should take them.
 #[derive(Clone, PartialEq, Eq)]
 pub struct PostgresUrl(url::Url);
 
