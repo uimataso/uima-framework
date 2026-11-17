@@ -13,6 +13,7 @@ grows:
 | `testing`                             | Not tests: shared test helpers and doubles                         | `mod testing` in `src/foo.rs`      |
 | `contract`                            | Not tests: a port's test suite that every adapter runs             | `pub mod contract` in `src/foo.rs` |
 | `tests/` at the crate root            | Only for code a crate can't test from inside, such as a proc macro | n/a                                |
+| `testdata/` at the crate root         | Not code: files a test reads, such as migrations, keys or media    | `testdata/migrations/`             |
 
 - `tests.rs` holds the module body directly; don't wrap it in another `mod tests { ... }`. When it
   grows into `tests/`, move it to `tests/mod.rs`; never keep `tests.rs` and `tests/` side by side.
@@ -24,6 +25,7 @@ grows:
 - `testing` that other crates use is behind the `testing` feature; `testing` used only by its own
   crate is behind `cfg(test)`.
 - `testing` and `contract` grow the same way as `tests`, inline first, then a file.
+- A key or credential in `testdata/` is named `test-only-*`, so it reads as one no service trusts.
 
 Assertions use `uima_testing::check!` and `uima_testing::assert!`, never `std::assert*!`, for their
 output. A pattern match is `assert!(let Ok(user) = result)`.
