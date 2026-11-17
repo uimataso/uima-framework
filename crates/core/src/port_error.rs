@@ -99,8 +99,8 @@ impl Failure {
     }
 }
 
-/// Wraps a [`Failure`]'s message in a context and keeps its kind, where anyhow's `.context` on a
-/// port call would turn the failure into an [`Other`](FailureKind::Other) one.
+/// Wraps a [`Failure`]'s message in a context and keeps a port failure's kind, where anyhow's
+/// `.context` on a port call would turn the failure into an [`Other`](FailureKind::Other) one.
 ///
 /// ```
 /// use uima_core::{Failure, FailureContext as _, PortResult};
@@ -110,19 +110,30 @@ impl Failure {
 /// }
 /// ```
 pub trait FailureContext<T> {
-    /// The failure wrapped in `context`, keeping its kind and wait.
+    /// The failure wrapped in `context`, keeping its kind and wait; an outcome of a port's contract
+    /// the caller doesn't handle becomes an [`Other`](FailureKind::Other) failure.
     fn failure_context<C>(self, context: C) -> Result<T, Failure>
     where
         C: fmt::Display + Send + Sync + 'static;
 }
 
-/// A port with no contract error, whose only error is a [`Failure`].
-impl<T> FailureContext<T> for PortResult<T> {
+/// A port's failure keeps its kind; an outcome of its contract, which the caller doesn't handle,
+/// becomes an [`Other`](FailureKind::Other) failure.
+impl<T, E> FailureContext<T> for PortResult<T, E>
+where
+    E: Error + Send + Sync + 'static,
+{
     fn failure_context<C>(self, context: C) -> Result<T, Failure>
     where
         C: fmt::Display + Send + Sync + 'static,
     {
-        self.map_err(|PortError::Failed(failure)| failure.context(context))
+        self.map_err(|error| {
+            match error {
+                PortError::Contract(outcome) => Failure::new(FailureKind::Other, outcome),
+                PortError::Failed(failure) => failure,
+            }
+            .context(context)
+        })
     }
 }
 
@@ -138,6 +149,13 @@ impl<T> FailureContext<T> for Result<T, Failure> {
 impl<E> From<Failure> for PortError<E> {
     fn from(error: Failure) -> Self {
         Self::Failed(error)
+    }
+}
+
+/// The failure of a port with no contract error, so `?` keeps its kind.
+impl From<PortError<!>> for Failure {
+    fn from(PortError::Failed(failure): PortError<!>) -> Self {
+        failure
     }
 }
 
@@ -280,7 +298,9 @@ mod tests {
 
     #[test]
     fn failure_context_keeps_a_port_failures_kind() {
-        let result: PortResult<()> = Err(Failure::new(FailureKind::Timeout, with_context()).into());
+        let failure = Failure::new(FailureKind::Timeout, with_context())
+            .with_retry_after(Some(Duration::from_secs(4)));
+        let result: PortResult<()> = Err(failure.into());
         let failure = result
             .failure_context("failed to list the groups")
             .unwrap_err();
@@ -288,6 +308,7 @@ mod tests {
         let source = failure.source().map(ToString::to_string);
         check!(source.as_deref() == Some("couldn't insert the group"));
         check!(failure.kind() == FailureKind::Timeout);
+        check!(failure.retry_after() == Some(Duration::from_secs(4)));
     }
 
     #[test]
@@ -304,9 +325,44 @@ mod tests {
     }
 
     #[test]
+    fn failure_context_makes_an_unhandled_contract_outcome_an_other_failure() {
+        let result: PortResult<(), NotFound> = Err(PortError::Contract(NotFound));
+        let failure = result
+            .failure_context("failed to get the group")
+            .unwrap_err();
+        check!(failure.to_string() == "failed to get the group");
+        let source = failure.source().map(ToString::to_string);
+        check!(source.as_deref() == Some("not found"));
+        check!(failure.kind() == FailureKind::Other);
+    }
+
+    #[test]
+    fn failure_context_keeps_the_kind_of_a_contract_ports_failure() {
+        let result: PortResult<(), NotFound> =
+            Err(Failure::new(FailureKind::Conflict, with_context()).into());
+        let failure = result
+            .failure_context("failed to get the group")
+            .unwrap_err();
+        check!(failure.to_string() == "failed to get the group");
+        check!(failure.kind() == FailureKind::Conflict);
+    }
+
+    #[test]
     fn failure_context_leaves_a_success_alone() {
         let result: PortResult<u8> = Ok(7);
         check!(result.failure_context("failed").unwrap() == 7);
+    }
+
+    #[test]
+    fn question_mark_takes_a_port_failure_as_it_is() {
+        fn usecase(port: PortResult<()>) -> Result<(), Failure> {
+            port?;
+            Ok(())
+        }
+        let failure = Failure::new(FailureKind::Timeout, with_context());
+        let failure = usecase(Err(failure.into())).unwrap_err();
+        check!(failure.to_string() == "couldn't insert the group");
+        check!(failure.kind() == FailureKind::Timeout);
     }
 
     #[test]
