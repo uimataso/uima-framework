@@ -55,7 +55,7 @@ pub use count::CountErrorKind;
 pub use invalid::{Invalid, Newtype};
 pub use number::NumberErrorKind;
 pub use page::{CountedPage, InvalidPage, OffsetPage, OffsetQuery, PageRule};
-pub use port_error::{Failure, FailureKind, PortError, PortResult};
+pub use port_error::{Failure, FailureContext, FailureKind, PortError, PortResult};
 pub use secret::Secret;
 pub use sort::{Sort, SortOrder};
 pub use text::{SecretErrorKind, TextErrorKind};

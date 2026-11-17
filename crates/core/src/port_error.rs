@@ -99,6 +99,42 @@ impl Failure {
     }
 }
 
+/// Wraps a [`Failure`]'s message in a context and keeps its kind, where anyhow's `.context` on a
+/// port call would turn the failure into an [`Other`](FailureKind::Other) one.
+///
+/// ```
+/// use uima_core::{Failure, FailureContext as _, PortResult};
+///
+/// fn list_groups(port: impl Fn() -> PortResult<Vec<String>>) -> Result<Vec<String>, Failure> {
+///     port().failure_context("failed to list the groups")
+/// }
+/// ```
+pub trait FailureContext<T> {
+    /// The failure wrapped in `context`, keeping its kind and wait.
+    fn failure_context<C>(self, context: C) -> Result<T, Failure>
+    where
+        C: fmt::Display + Send + Sync + 'static;
+}
+
+/// A port with no contract error, whose only error is a [`Failure`].
+impl<T> FailureContext<T> for PortResult<T> {
+    fn failure_context<C>(self, context: C) -> Result<T, Failure>
+    where
+        C: fmt::Display + Send + Sync + 'static,
+    {
+        self.map_err(|PortError::Failed(failure)| failure.context(context))
+    }
+}
+
+impl<T> FailureContext<T> for Result<T, Failure> {
+    fn failure_context<C>(self, context: C) -> Result<T, Failure>
+    where
+        C: fmt::Display + Send + Sync + 'static,
+    {
+        self.map_err(|failure| failure.context(context))
+    }
+}
+
 impl<E> From<Failure> for PortError<E> {
     fn from(error: Failure) -> Self {
         Self::Failed(error)
@@ -240,6 +276,37 @@ mod tests {
         check!(failed.to_string() == "couldn't insert the group");
         let source = failed.source().map(ToString::to_string);
         check!(source.as_deref() == Some("connection reset"));
+    }
+
+    #[test]
+    fn failure_context_keeps_a_port_failures_kind() {
+        let result: PortResult<()> = Err(Failure::new(FailureKind::Timeout, with_context()).into());
+        let failure = result
+            .failure_context("failed to list the groups")
+            .unwrap_err();
+        check!(failure.to_string() == "failed to list the groups");
+        let source = failure.source().map(ToString::to_string);
+        check!(source.as_deref() == Some("couldn't insert the group"));
+        check!(failure.kind() == FailureKind::Timeout);
+    }
+
+    #[test]
+    fn failure_context_wraps_a_failure() {
+        let result: Result<(), Failure> =
+            Err(Failure::new(FailureKind::Unavailable, with_context())
+                .with_retry_after(Some(Duration::from_secs(2))));
+        let failure = result
+            .failure_context("failed to list the groups")
+            .unwrap_err();
+        check!(failure.to_string() == "failed to list the groups");
+        check!(failure.kind() == FailureKind::Unavailable);
+        check!(failure.retry_after() == Some(Duration::from_secs(2)));
+    }
+
+    #[test]
+    fn failure_context_leaves_a_success_alone() {
+        let result: PortResult<u8> = Ok(7);
+        check!(result.failure_context("failed").unwrap() == 7);
     }
 
     #[test]
