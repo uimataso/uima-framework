@@ -64,7 +64,7 @@ mod tests {
 
     use super::*;
     use crate::testing::{TestPostgres, test_migrator};
-    use crate::{DatabaseName, MaxConnections, PostgresConfig, PostgresTarget};
+    use crate::{MaxConnections, PostgresConfig};
 
     const WRITE: &str = "INSERT INTO probes (key) VALUES ($1::uuid)";
     const EXISTS: &str = "SELECT EXISTS (SELECT 1 FROM probes WHERE key = $1::uuid)";
@@ -113,8 +113,16 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_deferred_constraint_fails_the_commit() {
+    async fn a_unit_of_work_fails_with_the_kind_of_its_cause() {
         let server = TestPostgres::start(&test_migrator().await).await;
+
+        a_deferred_constraint_fails_the_commit(&server).await;
+        begin_gives_up_on_a_full_pool_as_a_timeout(&server).await;
+        ending_a_unit_of_work_on_a_lost_connection_is_unavailable(&server).await;
+        a_commit_that_conflicts_is_a_conflict(&server).await;
+    }
+
+    async fn a_deferred_constraint_fails_the_commit(server: &TestPostgres) {
         let uow = server.isolated().await.uow("create group").await.unwrap();
         sqlx::raw_sql(
             "CREATE TEMP TABLE deferred (key INT UNIQUE DEFERRABLE INITIALLY DEFERRED); \
@@ -126,20 +134,18 @@ mod tests {
 
         let error = uow.commit().await.unwrap_err();
         check!(error.to_string() == "failed to commit create group");
+        check!(error.kind() == FailureKind::Other);
     }
 
-    #[tokio::test]
-    async fn begin_gives_up_on_a_full_pool_as_a_timeout() {
-        let server = TestPostgres::start(&test_migrator().await).await;
-        let target = PostgresTarget {
-            url: server.url().clone(),
-            database: DatabaseName::new("app").unwrap(),
-        };
+    async fn begin_gives_up_on_a_full_pool_as_a_timeout(server: &TestPostgres) {
         let config = PostgresConfig {
             max_connections: MaxConnections::new(1).unwrap(),
+            // Short, since the case waits it out, but long enough that connecting fits in it on a
+            // busy machine.
+            acquire_timeout: std::time::Duration::from_secs(2),
             ..PostgresConfig::default()
         };
-        let postgres = PostgresClient::connect(&target, &config).await.unwrap();
+        let postgres = server.isolated_with(&config).await;
 
         let _held = postgres.pool().acquire().await.unwrap();
         let error = postgres.uow("create group").await.unwrap_err();
@@ -163,9 +169,7 @@ mod tests {
         uow
     }
 
-    #[tokio::test]
-    async fn ending_a_unit_of_work_on_a_lost_connection_is_unavailable() {
-        let server = TestPostgres::start(&test_migrator().await).await;
+    async fn ending_a_unit_of_work_on_a_lost_connection_is_unavailable(server: &TestPostgres) {
         let postgres = server.isolated().await;
 
         let error = cut_off(&postgres).await.commit().await.unwrap_err();
@@ -193,9 +197,7 @@ mod tests {
         uow
     }
 
-    #[tokio::test]
-    async fn a_commit_that_conflicts_is_a_conflict() {
-        let server = TestPostgres::start(&test_migrator().await).await;
+    async fn a_commit_that_conflicts_is_a_conflict(server: &TestPostgres) {
         let postgres = server.isolated().await;
 
         // Each reads the probes and then writes one, so one of them must fail.

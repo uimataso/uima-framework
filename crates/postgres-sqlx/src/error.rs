@@ -169,11 +169,18 @@ mod tests {
 
         use super::*;
         use crate::testing::{TestPostgres, test_migrator};
-        use crate::{PostgresClient, PostgresConfig, PostgresTarget};
+        use crate::{PostgresClient, PostgresConfig};
 
         #[tokio::test]
-        async fn each_sqlstate_takes_its_kind() {
+        async fn errors_take_their_causes_kind_or_the_contracts_error() {
             let server = TestPostgres::start(&test_migrator().await).await;
+
+            each_sqlstate_takes_its_kind(&server).await;
+            a_contract_maps_the_errors_it_names_and_leaves_the_rest_as_failures(&server).await;
+            a_lock_held_past_the_lock_timeout_is_a_timeout(&server).await;
+        }
+
+        async fn each_sqlstate_takes_its_kind(server: &TestPostgres) {
             let postgres = server.isolated().await;
 
             for (code, kind) in [
@@ -235,10 +242,10 @@ mod tests {
             postgres
         }
 
-        #[tokio::test]
-        async fn a_contract_maps_the_errors_it_names_and_leaves_the_rest_as_failures() {
-            let server = TestPostgres::start(&test_migrator().await).await;
-            let postgres = with_members(&server).await;
+        async fn a_contract_maps_the_errors_it_names_and_leaves_the_rest_as_failures(
+            server: &TestPostgres,
+        ) {
+            let postgres = with_members(server).await;
 
             check!(let Err(PortError::Contract(MemberError::NoGroup)) = add_member(&postgres).await);
 
@@ -255,18 +262,12 @@ mod tests {
             check!(error.kind() == FailureKind::Other);
         }
 
-        #[tokio::test]
-        async fn a_lock_held_past_the_lock_timeout_is_a_timeout() {
-            let server = TestPostgres::start(&test_migrator().await).await;
-            let target = PostgresTarget {
-                url: server.url().clone(),
-                database: crate::DatabaseName::new("app").unwrap(),
-            };
+        async fn a_lock_held_past_the_lock_timeout_is_a_timeout(server: &TestPostgres) {
             let config = PostgresConfig {
                 lock_timeout: Duration::from_millis(200),
                 ..PostgresConfig::default()
             };
-            let postgres = PostgresClient::connect(&target, &config).await.unwrap();
+            let postgres = server.isolated_with(&config).await;
             sqlx::raw_sql(
                 "CREATE TABLE locked (id INT PRIMARY KEY); INSERT INTO locked VALUES (1)",
             )
