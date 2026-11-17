@@ -349,6 +349,7 @@ mod props {
         ($mod:ident, $number:ident, $t:ty) => {
             mod $mod {
                 use proptest::prelude::*;
+                use proptest::property_test;
 
                 use super::*;
 
@@ -372,85 +373,82 @@ mod props {
                     ]
                 }
 
-                proptest! {
-                    #[test]
-                    fn new_accepts_exactly_the_range(n in edge()) {
-                        match $number::new(n) {
-                            Ok(number) => {
-                                prop_assert!(($number::MIN..=$number::MAX).contains(&n));
-                                prop_assert_eq!(number.get(), n);
-                            }
-                            Err(error) => {
-                                prop_assert!(!($number::MIN..=$number::MAX).contains(&n));
-                                prop_assert_eq!(
-                                    error.into_kind(),
-                                    NumberErrorKind::OutOfRange {
-                                        received: n.into(),
-                                        min: $number::MIN.into(),
-                                        max: $number::MAX.into(),
-                                    }
-                                );
-                            }
+                #[property_test]
+                fn new_accepts_exactly_the_range(#[strategy = edge()] n: $t) {
+                    match $number::new(n) {
+                        Ok(number) => {
+                            prop_assert!(($number::MIN..=$number::MAX).contains(&n));
+                            prop_assert_eq!(number.get(), n);
                         }
-                    }
-
-                    #[test]
-                    fn round_trips_through_i64(n in signed()) {
-                        let in_range =
-                            (i64::from($number::MIN)..=i64::from($number::MAX)).contains(&n);
-                        match $number::try_from(n) {
-                            Ok(number) => prop_assert_eq!(i64::from(number), n),
-                            Err(error) => {
-                                prop_assert!(!in_range);
-                                prop_assert_eq!(
-                                    error.into_kind(),
-                                    NumberErrorKind::OutOfRange {
-                                        received: n.into(),
-                                        min: $number::MIN.into(),
-                                        max: $number::MAX.into(),
-                                    }
-                                );
-                            }
-                        }
-                    }
-
-                    #[test]
-                    fn try_add_and_try_sub_match_the_wide_arithmetic(
-                        n in $number::MIN..=$number::MAX,
-                        by in edge(),
-                    ) {
-                        let number = $number::new(n).unwrap();
-                        let range = i128::from($number::MIN)..=i128::from($number::MAX);
-                        for (result, wide) in [
-                            (number.try_add(by), i128::from(n) + i128::from(by)),
-                            (number.try_sub(by), i128::from(n) - i128::from(by)),
-                        ] {
-                            match result {
-                                Ok(next) => prop_assert_eq!(i128::from(next.get()), wide),
-                                Err(error) => {
-                                    prop_assert!(!range.contains(&wide));
-                                    prop_assert_eq!(
-                                        error.into_kind(),
-                                        NumberErrorKind::OutOfRange {
-                                            received: wide,
-                                            min: $number::MIN.into(),
-                                            max: $number::MAX.into(),
-                                        }
-                                    );
+                        Err(error) => {
+                            prop_assert!(!($number::MIN..=$number::MAX).contains(&n));
+                            prop_assert_eq!(
+                                error.into_kind(),
+                                NumberErrorKind::OutOfRange {
+                                    received: n.into(),
+                                    min: $number::MIN.into(),
+                                    max: $number::MAX.into(),
                                 }
+                            );
+                        }
+                    }
+                }
+
+                #[property_test]
+                fn round_trips_through_i64(#[strategy = signed()] n: i64) {
+                    let in_range = (i64::from($number::MIN)..=i64::from($number::MAX)).contains(&n);
+                    match $number::try_from(n) {
+                        Ok(number) => prop_assert_eq!(i64::from(number), n),
+                        Err(error) => {
+                            prop_assert!(!in_range);
+                            prop_assert_eq!(
+                                error.into_kind(),
+                                NumberErrorKind::OutOfRange {
+                                    received: n.into(),
+                                    min: $number::MIN.into(),
+                                    max: $number::MAX.into(),
+                                }
+                            );
+                        }
+                    }
+                }
+
+                #[property_test]
+                fn try_add_and_try_sub_match_the_wide_arithmetic(
+                    #[strategy = $number::MIN..=$number::MAX] n: $t,
+                    #[strategy = edge()] by: $t,
+                ) {
+                    let number = $number::new(n).unwrap();
+                    let range = i128::from($number::MIN)..=i128::from($number::MAX);
+                    for (result, wide) in [
+                        (number.try_add(by), i128::from(n) + i128::from(by)),
+                        (number.try_sub(by), i128::from(n) - i128::from(by)),
+                    ] {
+                        match result {
+                            Ok(next) => prop_assert_eq!(i128::from(next.get()), wide),
+                            Err(error) => {
+                                prop_assert!(!range.contains(&wide));
+                                prop_assert_eq!(
+                                    error.into_kind(),
+                                    NumberErrorKind::OutOfRange {
+                                        received: wide,
+                                        min: $number::MIN.into(),
+                                        max: $number::MAX.into(),
+                                    }
+                                );
                             }
                         }
                     }
+                }
 
-                    #[test]
-                    fn orders_and_displays_as_the_number(
-                        a in $number::MIN..=$number::MAX,
-                        b in $number::MIN..=$number::MAX,
-                    ) {
-                        let (x, y) = ($number::new(a).unwrap(), $number::new(b).unwrap());
-                        prop_assert_eq!(x.cmp(&y), a.cmp(&b));
-                        prop_assert_eq!(x.to_string(), a.to_string());
-                    }
+                #[property_test]
+                fn orders_and_displays_as_the_number(
+                    #[strategy = $number::MIN..=$number::MAX] a: $t,
+                    #[strategy = $number::MIN..=$number::MAX] b: $t,
+                ) {
+                    let (x, y) = ($number::new(a).unwrap(), $number::new(b).unwrap());
+                    prop_assert_eq!(x.cmp(&y), a.cmp(&b));
+                    prop_assert_eq!(x.to_string(), a.to_string());
                 }
             }
         };

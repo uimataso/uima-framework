@@ -35,7 +35,7 @@ tracing-subscriber = { version = "0.3", default-features = false }
 
 # dev dependencies
 assert2 = "0.4"
-proptest = "1"
+proptest = { version = "1", features = ["attr-macro"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 

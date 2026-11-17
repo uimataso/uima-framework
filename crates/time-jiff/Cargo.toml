@@ -22,6 +22,7 @@ jiff = "0.2.45"
 serde = { workspace = true, optional = true }
 
 [dev-dependencies]
+proptest = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 uima-testing = { workspace = true }
