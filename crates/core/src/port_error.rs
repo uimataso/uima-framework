@@ -99,8 +99,8 @@ impl Failure {
     }
 }
 
-/// Wraps a [`Failure`]'s message in a context and keeps its kind, where anyhow's `.context` on a
-/// port call would turn the failure into an [`Other`](FailureKind::Other) one.
+/// Wraps a [`Failure`]'s message in a context and keeps a port failure's kind, where anyhow's
+/// `.context` on a port call would turn the failure into an [`Other`](FailureKind::Other) one.
 ///
 /// ```
 /// use uima_core::{Failure, FailureContext as _, PortResult};
@@ -110,7 +110,8 @@ impl Failure {
 /// }
 /// ```
 pub trait FailureContext<T> {
-    /// The failure wrapped in `context`, keeping its kind and wait.
+    /// The failure wrapped in `context`, keeping its kind and wait; an outcome of a port's contract
+    /// the caller doesn't handle becomes an [`Other`](FailureKind::Other) failure.
     fn failure_context<C>(self, context: C) -> Result<T, Failure>
     where
         C: fmt::Display + Send + Sync + 'static;
@@ -126,11 +127,13 @@ where
     where
         C: fmt::Display + Send + Sync + 'static,
     {
-        self.map_err(|error| match error {
-            PortError::Contract(outcome) => Failure::from(anyhow::Error::new(outcome)),
-            PortError::Failed(failure) => failure,
+        self.map_err(|error| {
+            match error {
+                PortError::Contract(outcome) => Failure::new(FailureKind::Other, outcome),
+                PortError::Failed(failure) => failure,
+            }
+            .context(context)
         })
-        .map_err(|failure| failure.context(context))
     }
 }
 
@@ -337,6 +340,7 @@ mod tests {
         let failure = result
             .failure_context("failed to get the group")
             .unwrap_err();
+        check!(failure.to_string() == "failed to get the group");
         check!(failure.kind() == FailureKind::Conflict);
     }
 
