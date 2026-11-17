@@ -17,21 +17,28 @@
 //! );
 //! ```
 //!
-//! In a `ServiceBuilder` the first layer is the outermost and sees a request first, so put
-//! [`Trace`] first to log every request, refused ones included. `Router::layer` wraps the routes
-//! the router has so far, so call it after adding them.
-
-use std::pin::Pin;
+//! In a `ServiceBuilder` the first layer is the outermost and sees a request first. Put [`Trace`]
+//! first to log every request, refused ones included, and [`OriginAuth`] before [`SameOrigin`], so
+//! a request that bypasses the proxy gets a bare `403` and not the service's own refusal.
+//! `Router::layer` wraps the routes the router has so far, so call it after adding them.
+//! [`OriginAuth`] and [`SameOrigin`] go around a service that returns axum's `Response`, as
+//! routes do.
+//!
+//! # Paths
+//!
+//! A path given to [`OriginAuth::exempt`] or [`Trace::hide_query_on`] matches a request only when
+//! it is the same as the request's path as the layer sees it, the query left out. So `/healthz`
+//! doesn't match `/healthz/` or `/HEALTHZ`, and under a `Router::nest` the path leaves out the
+//! nest's prefix.
 
 mod origin_auth;
+mod paths;
 mod same_origin;
 mod trace;
 
 #[cfg(test)]
 mod tests;
 
-pub use origin_auth::{OriginAuth, OriginAuthService, OriginSecret};
-pub use same_origin::{SameOrigin, SameOriginService};
+pub use origin_auth::{OriginAuth, OriginSecret};
+pub use same_origin::SameOrigin;
 pub use trace::{Trace, TraceService};
-
-type BoxFuture<T> = Pin<Box<dyn Future<Output = T> + Send>>;

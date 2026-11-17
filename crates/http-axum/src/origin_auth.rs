@@ -1,15 +1,16 @@
 //! [`OriginAuth`], refusing requests that bypass the proxy in front.
 
 use std::sync::Arc;
-use std::task::{Context, Poll};
 
-use axum::http::{Request, StatusCode};
-use axum::response::{IntoResponse, Response};
+use axum::body::Body;
+use axum::http::{Request, Response, StatusCode};
+use axum::response::IntoResponse as _;
 use subtle::ConstantTimeEq as _;
-use tower::{Layer, Service};
+use tower::Layer;
+use tower_http::validate_request::{ValidateRequest, ValidateRequestHeader};
 use tracing::warn;
 
-use crate::BoxFuture;
+use crate::paths::Paths;
 
 uima_core::secret!(
     /// The secret the proxy in front adds to every request, 32 to 256 visible ASCII characters.
@@ -20,10 +21,14 @@ uima_core::secret!(
 
 /// Refuses a request that doesn't carry the secret the proxy in front, such as Cloudflare, adds in
 /// the [`HEADER`](Self::HEADER) header, so a request sent straight to the host gets a bare `403`.
+///
+/// A request that passes goes on without the header, so the secret doesn't reach the layers and
+/// the handler inside this one.
 #[derive(Debug, Clone)]
 pub struct OriginAuth {
-    secret: Option<OriginSecret>,
-    exempt_paths: Vec<String>,
+    // Shared, since axum clones the layer's service, this included, for every request.
+    secret: Option<Arc<OriginSecret>>,
+    exempt_paths: Paths,
 }
 
 impl OriginAuth {
@@ -41,18 +46,19 @@ impl OriginAuth {
         }
 
         Self {
-            secret,
-            exempt_paths: Vec::new(),
+            secret: secret.map(Arc::new),
+            exempt_paths: Paths::default(),
         }
     }
 
     /// Lets requests to `paths` through without the secret, such as the health check the host
-    /// sends itself.
+    /// sends itself. A path matches as the [crate docs](crate#paths) say.
     ///
-    /// A path matches only when it is the same as the request's path as this layer sees it, so
-    /// under a `Router::nest` it is the path with the nest's prefix taken off.
-    pub fn exempt<P: Into<String>>(mut self, paths: impl IntoIterator<Item = P>) -> Self {
-        self.exempt_paths.extend(paths.into_iter().map(Into::into));
+    /// # Panics
+    ///
+    /// If one of `paths` doesn't start with `/`.
+    pub fn exempt<P: AsRef<str>>(mut self, paths: impl IntoIterator<Item = P>) -> Self {
+        self.exempt_paths = self.exempt_paths.with(paths);
         self
     }
 
@@ -62,62 +68,40 @@ impl OriginAuth {
         };
 
         // Constant-time for a given length, so the response time shows at most the length.
-        self.exempt_paths.iter().any(|exempt| exempt == path)
+        self.exempt_paths.contains(path)
             || given.is_some_and(|given| given.ct_eq(secret.expose().as_bytes()).into())
     }
 }
 
 impl<S> Layer<S> for OriginAuth {
-    type Service = OriginAuthService<S>;
+    type Service = ValidateRequestHeader<S, Self>;
 
     fn layer(&self, inner: S) -> Self::Service {
-        OriginAuthService {
-            inner,
-            auth: Arc::new(self.clone()),
-        }
+        ValidateRequestHeader::custom(inner, self.clone())
     }
 }
 
-/// The service [`OriginAuth`] wraps around another.
-#[derive(Debug, Clone)]
-pub struct OriginAuthService<S> {
-    inner: S,
-    // Shared, so cloning the service doesn't copy the exempt paths.
-    auth: Arc<OriginAuth>,
-}
+impl<B> ValidateRequest<B> for OriginAuth {
+    type ResponseBody = Body;
 
-impl<S, B> Service<Request<B>> for OriginAuthService<S>
-where
-    S: Service<Request<B>>,
-    S::Response: IntoResponse,
-    S::Future: Send + 'static,
-{
-    type Response = Response;
-    type Error = S::Error;
-    type Future = BoxFuture<Result<Response, S::Error>>;
-
-    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.inner.poll_ready(cx)
-    }
-
-    fn call(&mut self, request: Request<B>) -> Self::Future {
+    fn validate(&mut self, request: &mut Request<B>) -> Result<(), Response<Body>> {
         let given = request
             .headers()
-            .get(OriginAuth::HEADER)
+            .get(Self::HEADER)
             .map(|value| value.as_bytes());
-        if !self.auth.allows(request.uri().path(), given) {
-            return Box::pin(async { Ok(StatusCode::FORBIDDEN.into_response()) });
+        if !self.allows(request.uri().path(), given) {
+            return Err(StatusCode::FORBIDDEN.into_response());
         }
 
-        let response = self.inner.call(request);
-        Box::pin(async { response.await.map(IntoResponse::into_response) })
+        request.headers_mut().remove(Self::HEADER);
+        Ok(())
     }
 }
 
 #[cfg(test)]
 mod tests {
     use axum::Router;
-    use axum::body::Body;
+    use axum::http::HeaderMap;
     use axum::routing::get;
     use proptest::prelude::*;
     use tower::ServiceExt as _;
@@ -167,6 +151,13 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn the_secret_doesnt_reach_the_handler() {
+        let auth = OriginAuth::new(Some(secret(SECRET))).exempt(["/healthz"]);
+        check!(send(auth.clone(), "/header", Some(SECRET)).await == StatusCode::OK);
+        check!(send(auth, "/healthz", Some("anything")).await == StatusCode::OK);
+    }
+
+    #[tokio::test]
     async fn a_refusal_is_a_bare_403_also_on_the_fallback() {
         let auth = OriginAuth::new(Some(secret(SECRET)));
         for path in ["/", "/missing"] {
@@ -179,16 +170,36 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn exempt_paths_match_exactly() {
-        let auth = OriginAuth::new(Some(secret(SECRET))).exempt(["/healthz"]);
+    async fn exempt_paths_match_exactly_and_add_up() {
+        let auth = OriginAuth::new(Some(secret(SECRET)))
+            .exempt(["/healthz"])
+            .exempt(["/"]);
         check!(send(auth.clone(), "/healthz", None).await == StatusCode::OK);
         check!(send(auth.clone(), "/healthz?probe=1", None).await == StatusCode::OK);
-        for path in ["/", "/healthz/x", "/healthzz", "/HEALTHZ"] {
+        check!(send(auth.clone(), "/", None).await == StatusCode::OK);
+        for path in ["/healthz/x", "/healthzz", "/HEALTHZ", "/header"] {
             check!(
                 send(auth.clone(), path, None).await == StatusCode::FORBIDDEN,
                 "{path}"
             );
         }
+    }
+
+    #[tokio::test]
+    async fn under_a_nest_exempt_paths_leave_out_its_prefix() {
+        let nested = |exempt| {
+            let auth = OriginAuth::new(Some(secret(SECRET))).exempt([exempt]);
+            let inner = Router::new()
+                .route("/healthz", get(|| async { "ok" }))
+                .layer(auth);
+            Router::new().nest("/api", inner)
+        };
+        let request = || Request::get("/api/healthz").body(Body::empty()).unwrap();
+
+        let response = nested("/healthz").oneshot(request()).await.unwrap();
+        check!(response.status() == StatusCode::OK);
+        let response = nested("/api/healthz").oneshot(request()).await.unwrap();
+        check!(response.status() == StatusCode::FORBIDDEN);
     }
 
     #[tokio::test]
@@ -214,11 +225,14 @@ mod tests {
         check!(trimmed.expose() == SECRET);
         check!(OriginSecret::new("a".repeat(32)).is_ok());
         check!(OriginSecret::new("a".repeat(256)).is_ok());
+        check!(OriginSecret::new(format!("{SECRET}!~")).is_ok());
 
         let invalid = [
             "a".repeat(31),
             "a".repeat(257),
             format!("{SECRET} x"),
+            format!("{SECRET}\tx"),
+            format!("{SECRET}\u{1}"),
             format!("{SECRET}é"),
         ];
         for invalid in invalid {
@@ -240,10 +254,11 @@ mod tests {
         request(auth, path, given).await.status()
     }
 
-    async fn request(auth: OriginAuth, path: &str, given: Option<&str>) -> Response {
+    async fn request(auth: OriginAuth, path: &str, given: Option<&str>) -> Response<Body> {
         let router = Router::new()
             .route("/", get(|| async { "ok" }))
-            .route("/healthz", get(|| async { "ok" }))
+            .route("/healthz", get(header_is_gone))
+            .route("/header", get(header_is_gone))
             .layer(auth);
         let mut request = Request::get(path);
         if let Some(given) = given {
@@ -252,5 +267,13 @@ mod tests {
 
         let request = request.body(Body::empty()).unwrap();
         router.oneshot(request).await.unwrap()
+    }
+
+    async fn header_is_gone(headers: HeaderMap) -> StatusCode {
+        if headers.contains_key("x-origin-auth") {
+            StatusCode::IM_A_TEAPOT
+        } else {
+            StatusCode::OK
+        }
     }
 }

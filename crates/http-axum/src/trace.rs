@@ -1,7 +1,6 @@
 //! [`Trace`], logging each request.
 
 use std::fmt;
-use std::sync::Arc;
 use std::task::{Context, Poll};
 
 use axum::http::{HeaderMap, HeaderName, Request, Uri, header};
@@ -11,14 +10,12 @@ use tower_http::request_id::{
     MakeRequestUuid, PropagateRequestId, PropagateRequestIdLayer, RequestId, SetRequestId,
     SetRequestIdLayer,
 };
-use tower_http::sensitive_headers::{
-    SetSensitiveRequestHeaders, SetSensitiveRequestHeadersLayer, SetSensitiveResponseHeaders,
-    SetSensitiveResponseHeadersLayer,
-};
+use tower_http::sensitive_headers::{SetSensitiveHeaders, SetSensitiveHeadersLayer};
 use tower_http::trace::{MakeSpan, TraceLayer};
 use tracing::{Span, info_span};
 
 use crate::OriginAuth;
+use crate::paths::Paths;
 
 const REQUEST_ID: HeaderName = HeaderName::from_static("x-request-id");
 /// The longest request id kept from a request.
@@ -27,19 +24,22 @@ const MAX_REQUEST_ID_LEN: usize = 128;
 /// Logs each request in a `request` span tagged with a request id, keeping credentials out of the
 /// log.
 ///
-/// The span is at `INFO`, so every event logged while handling the request at `info` or above,
-/// such as the handler's `error!`, carries the request's `method`, `uri` and `request_id`. Its
-/// start and finish events are at `DEBUG` under `tower_http` targets, so a filter such as
-/// `tower_http=debug` turns them on, and a 5xx response is logged at `ERROR`.
+/// The span is at `INFO` under the `uima_http_axum::trace` target, so every event logged while
+/// handling the request at `info` or above, such as the handler's `error!`, carries the request's
+/// `method`, `uri` and `request_id`. A filter that leaves that target off, such as `warn` or
+/// `my_app=info`, leaves the span and its fields off too. Its start and finish events are at
+/// `DEBUG` under `tower_http` targets, so a filter such as `tower_http=debug` turns them on, and a
+/// 5xx response is logged at `ERROR`. The `uri` is the request's as this layer sees it, so under a
+/// `Router::nest` it leaves out the nest's prefix.
 ///
 /// The request id is the request's `x-request-id` when that is 1 to 128 visible ASCII characters,
 /// and a new UUID otherwise, and the response carries it back. Headers that carry credentials,
 /// such as `authorization`, `cookie`, `set-cookie` and the [`OriginAuth`] header, are marked
-/// sensitive, so a log of them shows `Sensitive` instead of the value. A request's are marked
-/// before any layer inside this one sees them, and a response's before this one logs it.
+/// sensitive, so a log of them shows `Sensitive` instead of the value, in the layers and the
+/// handler inside this one and in the response it returns.
 #[derive(Debug, Clone, Default)]
 pub struct Trace {
-    hidden_query_paths: Arc<[String]>,
+    hidden_query_paths: Paths,
 }
 
 impl Trace {
@@ -48,17 +48,13 @@ impl Trace {
     }
 
     /// Logs requests to `paths` without their query string, for a query that carries a secret,
-    /// such as a webhook's signature.
+    /// such as a webhook's signature. A path matches as the [crate docs](crate#paths) say.
     ///
-    /// A path matches only when it is the same as the request's path as this layer sees it, so
-    /// under a `Router::nest` it is the path with the nest's prefix taken off.
-    pub fn hide_query_on<P: Into<String>>(mut self, paths: impl IntoIterator<Item = P>) -> Self {
-        self.hidden_query_paths = self
-            .hidden_query_paths
-            .iter()
-            .cloned()
-            .chain(paths.into_iter().map(Into::into))
-            .collect();
+    /// # Panics
+    ///
+    /// If one of `paths` doesn't start with `/`.
+    pub fn hide_query_on<P: AsRef<str>>(mut self, paths: impl IntoIterator<Item = P>) -> Self {
+        self.hidden_query_paths = self.hidden_query_paths.with(paths);
         self
     }
 }
@@ -67,26 +63,21 @@ impl<S> Layer<S> for Trace {
     type Service = TraceService<S>;
 
     fn layer(&self, inner: S) -> Self::Service {
-        let sensitive = || {
-            [
-                header::AUTHORIZATION,
-                header::PROXY_AUTHORIZATION,
-                header::COOKIE,
-                header::SET_COOKIE,
-                HeaderName::from_static(OriginAuth::HEADER),
-            ]
-        };
-        // The request headers are marked outside the trace and the response headers inside it,
-        // so the trace sees both marked.
+        let sensitive = [
+            header::AUTHORIZATION,
+            header::PROXY_AUTHORIZATION,
+            header::COOKIE,
+            header::SET_COOKIE,
+            HeaderName::from_static(OriginAuth::HEADER),
+        ];
         let inner = PropagateRequestIdLayer::new(REQUEST_ID).layer(inner);
-        let inner = SetSensitiveResponseHeadersLayer::new(sensitive()).layer(inner);
         let inner = TraceLayer::new_for_http()
             .make_span_with(RequestSpan {
                 hidden_query_paths: self.hidden_query_paths.clone(),
             })
             .layer(inner);
         let inner = SetRequestIdLayer::new(REQUEST_ID, MakeRequestUuid).layer(inner);
-        let inner = SetSensitiveRequestHeadersLayer::new(sensitive()).layer(inner);
+        let inner = SetSensitiveHeadersLayer::new(sensitive).layer(inner);
         TraceService { inner }
     }
 }
@@ -103,10 +94,10 @@ impl<S> fmt::Debug for TraceService<S> {
     }
 }
 
-type Stack<S> = SetSensitiveRequestHeaders<
+type Stack<S> = SetSensitiveHeaders<
     SetRequestId<
         tower_http::trace::Trace<
-            SetSensitiveResponseHeaders<PropagateRequestId<S>>,
+            PropagateRequestId<S>,
             SharedClassifier<ServerErrorsAsFailures>,
             RequestSpan,
         >,
@@ -135,19 +126,11 @@ where
     }
 }
 
-fn has_valid_request_id(headers: &HeaderMap) -> bool {
-    let mut ids = headers.get_all(REQUEST_ID).iter();
-    let (Some(id), None) = (ids.next(), ids.next()) else {
-        return false;
-    };
-    (1..=MAX_REQUEST_ID_LEN).contains(&id.len()) && id.as_bytes().iter().all(u8::is_ascii_graphic)
-}
-
 /// `tower_http`'s default span at `INFO`, minus the query on `hidden_query_paths`, plus the
 /// request id.
 #[derive(Debug, Clone)]
 pub struct RequestSpan {
-    hidden_query_paths: Arc<[String]>,
+    hidden_query_paths: Paths,
 }
 
 impl<B> MakeSpan<B> for RequestSpan {
@@ -173,18 +156,26 @@ impl<B> MakeSpan<B> for RequestSpan {
 /// A request's URI as the span logs it, formatted only when the span is enabled.
 struct LoggedUri<'a> {
     uri: &'a Uri,
-    hidden_query_paths: &'a [String],
+    hidden_query_paths: &'a Paths,
 }
 
 impl fmt::Display for LoggedUri<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let path = self.uri.path();
-        if self.hidden_query_paths.iter().any(|hidden| hidden == path) {
+        if self.hidden_query_paths.contains(path) {
             f.write_str(path)
         } else {
             fmt::Display::fmt(self.uri, f)
         }
     }
+}
+
+fn has_valid_request_id(headers: &HeaderMap) -> bool {
+    let mut ids = headers.get_all(REQUEST_ID).iter();
+    let (Some(id), None) = (ids.next(), ids.next()) else {
+        return false;
+    };
+    (1..=MAX_REQUEST_ID_LEN).contains(&id.len()) && id.as_bytes().iter().all(u8::is_ascii_graphic)
 }
 
 #[cfg(test)]
@@ -205,7 +196,15 @@ mod tests {
     #[tokio::test]
     async fn a_valid_request_id_is_kept() {
         let longest = "a".repeat(128);
-        for id in ["abc-123", "4a826a43-6628-41d7-b903-7da981d22075", &longest] {
+        let ids = [
+            "abc-123",
+            "4a826a43-6628-41d7-b903-7da981d22075",
+            "!",
+            "~",
+            "a.b_c:~/=+",
+            &longest,
+        ];
+        for id in ids {
             let logs = LogCapture::start();
 
             let response = send(Trace::new(), Request::get("/").header("x-request-id", id)).await;
@@ -223,6 +222,7 @@ mod tests {
             &[b""],
             &[too_long.as_bytes()],
             &[b"a b"],
+            &[b"a\tb"],
             &[b"caf\xc3\xa9"],
             &[b"id-\xff"],
             &[b"one", b"two"],
@@ -270,10 +270,52 @@ mod tests {
         check!(!logs.mentions("s3cret"));
         check!(span_fields(&logs)["uri"] == "/hook");
 
-        for uri in ["/hooks?sign=s3cret", "/?sign=s3cret"] {
+        for uri in ["/hooks?sign=s3cret", "/HOOK?sign=s3cret", "/?sign=s3cret"] {
             let logs = LogCapture::start();
             send(trace.clone(), Request::get(uri)).await;
             check!(span_fields(&logs)["uri"] == uri);
+        }
+    }
+
+    #[tokio::test]
+    async fn hidden_paths_add_up() {
+        let trace = Trace::new().hide_query_on(["/hook"]).hide_query_on(["/"]);
+        for path in ["/hook", "/"] {
+            let logs = LogCapture::start();
+            send(trace.clone(), Request::get(format!("{path}?sign=s3cret"))).await;
+            check!(span_fields(&logs)["uri"] == path);
+        }
+    }
+
+    #[tokio::test]
+    async fn under_a_nest_the_path_leaves_out_its_prefix() {
+        let inner = Router::new()
+            .route("/hook", get(|| async {}))
+            .layer(Trace::new().hide_query_on(["/hook"]));
+        let router = Router::new().nest("/api", inner);
+        let logs = LogCapture::start();
+
+        let request = Request::get("/api/hook?sign=s3cret").body(Body::empty());
+        router.oneshot(request.unwrap()).await.unwrap();
+
+        check!(!logs.mentions("s3cret"));
+        check!(span_fields(&logs)["uri"] == "/hook");
+    }
+
+    #[tokio::test]
+    async fn start_and_finish_are_debug_events_under_tower_http() {
+        let logs = LogCapture::start();
+
+        send(Trace::new(), Request::get("/")).await;
+
+        let events = logs.events();
+        for target in [
+            "tower_http::trace::on_request",
+            "tower_http::trace::on_response",
+        ] {
+            let event = events.iter().find(|event| event.target == target);
+            assert!(let Some(event) = event, "{target}");
+            check!(event.level == Level::DEBUG, "{target}");
         }
     }
 
@@ -343,6 +385,11 @@ mod tests {
 
         check!(response.status() == StatusCode::OK);
         check!(!logs.mentions("s3cret"));
+    }
+
+    #[test]
+    fn debug_names_the_service() {
+        check!(format!("{:?}", Trace::new().layer(())).starts_with("TraceService"));
     }
 
     async fn send(trace: Trace, request: axum::http::request::Builder) -> Response {

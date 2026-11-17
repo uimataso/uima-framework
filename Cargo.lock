@@ -2788,6 +2788,7 @@ dependencies = [
  "bytes",
  "http",
  "http-body",
+ "mime",
  "percent-encoding",
  "pin-project-lite",
  "tower-layer",

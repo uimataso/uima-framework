@@ -2,17 +2,18 @@
 
 use std::fmt;
 use std::sync::Arc;
-use std::task::{Context, Poll};
 
-use axum::http::{Request, StatusCode};
+use axum::body::Body;
+use axum::http::{Method, Request, StatusCode};
 use axum::response::{IntoResponse, Response};
-use tower::{Layer, Service};
+use tower::Layer;
+use tower_http::validate_request::{ValidateRequest, ValidateRequestHeader};
 
-use crate::BoxFuture;
+/// The methods a request from anywhere may use, `http`'s `Method::is_safe` being a list that grows.
+const SAFE_METHODS: [Method; 4] = [Method::GET, Method::HEAD, Method::OPTIONS, Method::TRACE];
 
-/// Refuses a request with an unsafe method, any but `GET`, `HEAD`, `OPTIONS` and `TRACE`, that
-/// another site's page sent, so that page can't act through the browser of someone who visits it
-/// (CSRF).
+/// Refuses a request with an unsafe method, any but `GET`, `HEAD`, `OPTIONS` and `TRACE`, that a
+/// browser says another site's page sent, against cross-site request forgery (CSRF).
 ///
 /// A service needs it when a browser's requests are trusted by what they carry on their own, such
 /// as a cookie or the network they come from. A bearer token in `authorization` isn't one, since
@@ -21,9 +22,9 @@ use crate::BoxFuture;
 /// passes.
 ///
 /// A request passes when its `sec-fetch-site` is `same-origin` or `none`, or, from a browser that
-/// doesn't send `sec-fetch-site`, when its `origin` names its own host exactly. A request with
-/// neither header, such as one from `curl`, passes too. A refused request gets a bare `403`, or
-/// what [`refuse_with`](Self::refuse_with) returns.
+/// doesn't send `sec-fetch-site`, when its `origin` names its own host exactly, the scheme left
+/// out. A request with neither header, such as one from `curl`, passes too. A refused request gets
+/// a bare `403`, or what [`refuse_with`](Self::refuse_with) returns.
 #[derive(Clone)]
 pub struct SameOrigin {
     refusal: Arc<dyn Fn() -> Response + Send + Sync>,
@@ -57,52 +58,22 @@ impl fmt::Debug for SameOrigin {
 }
 
 impl<S> Layer<S> for SameOrigin {
-    type Service = SameOriginService<S>;
+    type Service = ValidateRequestHeader<S, Self>;
 
     fn layer(&self, inner: S) -> Self::Service {
-        SameOriginService {
-            inner,
-            refusal: self.refusal.clone(),
+        ValidateRequestHeader::custom(inner, self.clone())
+    }
+}
+
+impl<B> ValidateRequest<B> for SameOrigin {
+    type ResponseBody = Body;
+
+    fn validate(&mut self, request: &mut Request<B>) -> Result<(), Response> {
+        if SAFE_METHODS.contains(request.method()) || is_same_origin(request) {
+            Ok(())
+        } else {
+            Err((self.refusal)())
         }
-    }
-}
-
-/// The service [`SameOrigin`] wraps around another.
-#[derive(Clone)]
-pub struct SameOriginService<S> {
-    inner: S,
-    refusal: Arc<dyn Fn() -> Response + Send + Sync>,
-}
-
-impl<S: fmt::Debug> fmt::Debug for SameOriginService<S> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("SameOriginService")
-            .field("inner", &self.inner)
-            .finish_non_exhaustive()
-    }
-}
-
-impl<S, B> Service<Request<B>> for SameOriginService<S>
-where
-    S: Service<Request<B>>,
-    S::Response: IntoResponse,
-    S::Future: Send + 'static,
-{
-    type Response = Response;
-    type Error = S::Error;
-    type Future = BoxFuture<Result<Response, S::Error>>;
-
-    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.inner.poll_ready(cx)
-    }
-
-    fn call(&mut self, request: Request<B>) -> Self::Future {
-        if !request.method().is_safe() && !is_same_origin(&request) {
-            let refusal = (self.refusal)();
-            return Box::pin(async { Ok(refusal) });
-        }
-        let response = self.inner.call(request);
-        Box::pin(async { response.await.map(IntoResponse::into_response) })
     }
 }
 
@@ -119,8 +90,12 @@ fn is_same_origin<B>(request: &Request<B>) -> bool {
     let Some(origin) = header("origin") else {
         return true;
     };
-    // HTTP/2 carries the host in the URI instead of a `host` header.
-    let host = header("host").or_else(|| request.uri().authority().map(|a| a.as_str()));
+    // The URI carries the host over HTTP/2, and wins over `host` in an absolute-form request.
+    let host = request
+        .uri()
+        .authority()
+        .map(|authority| authority.as_str())
+        .or_else(|| header("host"));
     let origin_host = origin.split_once("://").map(|(_, host)| host);
     origin_host.is_some_and(|origin_host| Some(origin_host) == host)
 }
@@ -128,8 +103,7 @@ fn is_same_origin<B>(request: &Request<B>) -> bool {
 #[cfg(test)]
 mod tests {
     use axum::Router;
-    use axum::body::Body;
-    use axum::http::{Method, Version};
+    use axum::http::Version;
     use axum::routing::any;
     use tower::ServiceExt as _;
     use uima_testing::check;
@@ -158,9 +132,12 @@ mod tests {
             (&[("origin", "http://evil"), ("host", "t")], false),
             (&[("origin", "null"), ("host", "t")], false),
             (&[("origin", "http://t")], false),
+            (&[("origin", "t"), ("host", "t")], false),
             (&[], true),
         ];
-        let methods = ["POST", "PUT", "PATCH", "DELETE", "CONNECT", "PROPFIND"];
+        let methods = [
+            "POST", "PUT", "PATCH", "DELETE", "CONNECT", "QUERY", "PROPFIND",
+        ];
         for (headers, passes) in cases {
             for method in methods {
                 let mut request = Request::builder().method(method).uri("/");
@@ -205,6 +182,15 @@ mod tests {
         let status = send(SameOrigin::new(), request("http://evil"))
             .await
             .status();
+        check!(status == StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn the_uri_wins_over_the_host_header() {
+        let request = Request::post("http://evil/")
+            .header("host", "t")
+            .header("origin", "http://t");
+        let status = send(SameOrigin::new(), request).await.status();
         check!(status == StatusCode::FORBIDDEN);
     }
 
