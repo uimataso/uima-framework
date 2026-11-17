@@ -2890,6 +2890,7 @@ dependencies = [
  "proptest",
  "serde",
  "serde_json",
+ "tokio",
  "uima-testing",
  "uuid",
 ]

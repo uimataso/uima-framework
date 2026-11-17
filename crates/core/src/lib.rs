@@ -34,6 +34,10 @@
 //! A [`PageRule`] turns a request's limit and offset into an [`OffsetQuery`]; a read returns an
 //! [`OffsetPage`] when it tells whether more rows follow, or a [`CountedPage`] when it counts them
 //! all. A [`Sort`] pairs what a list sorts by with a [`SortOrder`].
+//!
+//! # Features
+//!
+//! - `testing`: adds `unit_of_work::contract`, the cases every unit of work passes.
 
 mod count;
 mod invalid;
@@ -44,6 +48,7 @@ mod secret;
 mod sort;
 mod text;
 mod uid;
+pub mod unit_of_work;
 mod update;
 
 pub use count::CountErrorKind;
@@ -55,6 +60,7 @@ pub use secret::Secret;
 pub use sort::{Sort, SortOrder};
 pub use text::{SecretErrorKind, TextErrorKind};
 pub use uid::UidErrorKind;
+pub use unit_of_work::{HasUnitOfWork, ScopedUow, UnitOfWork};
 pub use update::{Changed, Update, UpdateOption};
 pub use uuid::Uuid;
 
