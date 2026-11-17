@@ -75,6 +75,7 @@ async fn connect_rejects_an_acquire_timeout_it_cant_wait() {
 
 #[cfg(feature = "testing")]
 mod with_a_server {
+    use uima_core::FailureKind;
     use uima_testing::check;
 
     use super::*;
@@ -158,6 +159,24 @@ mod with_a_server {
                 "{lock_timeout:?}"
             );
         }
+    }
+
+    #[tokio::test]
+    async fn conn_takes_a_pooled_connection_and_gives_it_back() {
+        let server = TestPostgres::start(&test_migrator().await).await;
+        let config = PostgresConfig {
+            max_connections: MaxConnections::new(1).unwrap(),
+            ..PostgresConfig::default()
+        };
+        let postgres = connect(&server, "app", &config).await;
+
+        let held = postgres.conn().await.unwrap();
+        let error = postgres.conn().await.unwrap_err();
+        check!(error.to_string() == "failed to take a pooled connection");
+        check!(error.kind() == FailureKind::Timeout);
+
+        drop(held);
+        check!(postgres.conn().await.is_ok());
     }
 
     #[tokio::test]

@@ -20,11 +20,12 @@ impl PostgresTransaction {
     /// The transaction's connection, held until the guard drops. Another `conn` on the same
     /// transaction waits for that, so drop the guard before calling another of its methods.
     ///
-    /// A setting changed on it follows the rule on [`PostgresClient::pool`]. Take an advisory lock
-    /// with `pg_advisory_xact_lock`, since a session lock stays on the connection after the
-    /// transaction.
-    pub async fn conn(&self) -> MappedMutexGuard<'_, PgConnection> {
-        MutexGuard::map(self.tx.lock().await, |tx| &mut **tx)
+    /// Session state on it follows the rule on [`PostgresClient::pool`].
+    ///
+    /// Never fails; it returns a `Result` like [`PostgresClient::conn`], so a repo's code is the
+    /// same on both.
+    pub async fn conn(&self) -> Result<MappedMutexGuard<'_, PgConnection>, Failure> {
+        Ok(MutexGuard::map(self.tx.lock().await, |tx| &mut **tx))
     }
 }
 
@@ -89,7 +90,7 @@ mod tests {
         async fn write(&self, key: Uuid) -> anyhow::Result<()> {
             sqlx::query(WRITE)
                 .bind(key.to_string())
-                .execute(&mut *self.conn().await)
+                .execute(&mut *self.conn().await?)
                 .await?;
             Ok(())
         }
@@ -97,7 +98,7 @@ mod tests {
         async fn exists(&self, key: Uuid) -> anyhow::Result<bool> {
             Ok(sqlx::query_scalar(EXISTS)
                 .bind(key.to_string())
-                .fetch_one(&mut *self.conn().await)
+                .fetch_one(&mut *self.conn().await?)
                 .await?)
         }
     }
@@ -119,7 +120,7 @@ mod tests {
             "CREATE TEMP TABLE deferred (key INT UNIQUE DEFERRABLE INITIALLY DEFERRED); \
              INSERT INTO deferred VALUES (1), (1)",
         )
-        .execute(&mut *uow.conn().await)
+        .execute(&mut *uow.conn().await.unwrap())
         .await
         .unwrap();
 
@@ -150,7 +151,7 @@ mod tests {
     async fn cut_off(postgres: &PostgresClient) -> ScopedUow<PostgresTransaction> {
         let uow = postgres.uow("create group").await.unwrap();
         let pid: i32 = sqlx::query_scalar("SELECT pg_backend_pid()")
-            .fetch_one(&mut *uow.conn().await)
+            .fetch_one(&mut *uow.conn().await.unwrap())
             .await
             .unwrap();
         // Waits until the backend has exited.
@@ -179,7 +180,7 @@ mod tests {
     /// A serializable unit of work that has read the probes.
     async fn serializable(postgres: &PostgresClient) -> ScopedUow<PostgresTransaction> {
         let uow = postgres.uow("create group").await.unwrap();
-        let mut conn = uow.conn().await;
+        let mut conn = uow.conn().await.unwrap();
         sqlx::query("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE")
             .execute(&mut *conn)
             .await

@@ -30,9 +30,11 @@ use std::{fmt, io};
 
 use anyhow::Context as _;
 use sqlx::migrate::Migrator;
+use sqlx::pool::PoolConnection;
 use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
 use sqlx::{AssertSqlSafe, Connection as _, PgConnection, PgPool};
 use tracing::info;
+use uima_core::Failure;
 
 mod config;
 mod database_name;
@@ -117,11 +119,21 @@ impl PostgresClient {
         Ok(())
     }
 
-    /// The pool, whose connections carry `lock_timeout` for their whole session. Change a setting
-    /// with `SET LOCAL`, since a plain `SET`, `RESET` or `DISCARD` stays on the connection for
-    /// whoever takes it next.
+    /// The pool, whose connections carry `lock_timeout` for their whole session. Session state
+    /// stays on a connection for whoever takes it next, so inside a transaction change a setting
+    /// with `SET LOCAL` and take an advisory lock with `pg_advisory_xact_lock`.
     pub fn pool(&self) -> &PgPool {
         &self.pool
+    }
+
+    /// A connection from the pool, back in it when dropped, so a repo runs a statement the same
+    /// way here and on a [`PostgresTransaction`]. Session state on it follows the rule on
+    /// [`pool`](Self::pool).
+    pub async fn conn(&self) -> Result<PoolConnection<sqlx::Postgres>, Failure> {
+        self.pool
+            .acquire()
+            .await
+            .pg_context("failed to take a pooled connection")
     }
 }
 
