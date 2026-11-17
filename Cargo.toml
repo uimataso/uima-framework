@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/*"]
+members = ["crates/*/*"]
 
 [workspace.package]
 version = "0.0.0"
@@ -20,13 +20,13 @@ todo = "warn"
 
 [workspace.dependencies]
 # local crates
-uima-cancel = { path = "./crates/cancel", version = "0.0.0" }
-uima-config = { path = "./crates/config", version = "0.0.0" }
-uima-core = { path = "./crates/core", version = "0.0.0" }
-uima-log-tracing = { path = "./crates/log-tracing", version = "0.0.0" }
-uima-port-macro = { path = "./crates/port-macro", version = "0.0.0" }
-uima-testing = { path = "./crates/testing", version = "0.0.0" }
-uima-time-jiff = { path = "./crates/time-jiff", version = "0.0.0" }
+uima-cancel = { path = "./crates/base/cancel", version = "0.0.0" }
+uima-config = { path = "./crates/base/config", version = "0.0.0" }
+uima-core = { path = "./crates/base/core", version = "0.0.0" }
+uima-log-tracing-subscriber = { path = "./crates/log/tracing-subscriber", version = "0.0.0" }
+uima-port-macro = { path = "./crates/base/port-macro", version = "0.0.0" }
+uima-testing = { path = "./crates/base/testing", version = "0.0.0" }
+uima-time = { path = "./crates/base/time", version = "0.0.0" }
 
 # workspace dependencies
 anyhow = "1"

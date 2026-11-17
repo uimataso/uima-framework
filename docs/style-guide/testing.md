@@ -36,8 +36,8 @@ case, e.g. `new_rejects_invalid_input` checking several inputs in a row.
 
 A harness sets up what a test runs against, such as a service in a container, and lives in a
 `testing` module. Each external service has one harness, in the crate for that service (e.g.
-`TestPostgres` in `uima-postgres-sqlx`); a crate that needs several composes them into its own
-harness.
+`TestPostgres` in `uima-client-postgres-sqlx`); a crate that needs several composes them into its
+own harness.
 
 ```rust
 #[tokio::test]

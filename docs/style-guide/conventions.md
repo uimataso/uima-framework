@@ -77,14 +77,14 @@ uima_core::text!(
 ## Time
 
 A point in time is a `jiff::Timestamp` and a length of time is a `std::time::Duration`. jiff comes
-from `uima-time-jiff`, which re-exports it so every app has the same version; an app doesn't
+from `uima-time`, which re-exports it so every app has the same version; an app doesn't
 depend on jiff itself.
 
 ```rust
 use std::time::Duration;
 
-use uima_time_jiff::TimestampExt as _;
-use uima_time_jiff::jiff::Timestamp;
+use uima_time::TimestampExt as _;
+use uima_time::jiff::Timestamp;
 
 fn time_left(now: Timestamp, issued_at: Timestamp, ttl: Duration) -> Duration {
     let expires_at = issued_at + ttl;
@@ -98,7 +98,7 @@ fn time_left(now: Timestamp, issued_at: Timestamp, ttl: Duration) -> Duration {
   comes from `TimestampExt`, so `SignedDuration` stays out of app code.
 - Name a length for what it is, `token_ttl: Duration`, not `token_ttl_secs: u64`. Turn it into a
   number of seconds only where it leaves, such as a JSON field or a provider's request.
-- In config, a length parses with `uima_time_jiff::parse_duration` (`30s`, `1h 30m`, `30d`) and a
+- In config, a length parses with `uima_time::parse_duration` (`30s`, `1h 30m`, `30d`) and a
   time zone with `NamedTimeZone`.
 
 ## Logging

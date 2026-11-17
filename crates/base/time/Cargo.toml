@@ -1,0 +1,31 @@
+[package]
+name = "uima-time"
+version.workspace = true
+rust-version.workspace = true
+edition.workspace = true
+authors.workspace = true
+
+[features]
+# test helpers
+testing = []
+# forwarded to the re-exported jiff
+serde = ["jiff/serde", "dep:serde"]
+tzdb-bundle-always = ["jiff/tzdb-bundle-always"]
+
+[dependencies]
+# local crates
+uima-port-macro = { workspace = true }
+
+# crate-local: re-exported, so every app uses this one version
+jiff = "0.2.45"
+
+serde = { workspace = true, optional = true }
+
+[dev-dependencies]
+proptest = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+uima-testing = { workspace = true }
+
+[lints]
+workspace = true
