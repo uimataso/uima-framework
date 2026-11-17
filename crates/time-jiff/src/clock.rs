@@ -1,4 +1,4 @@
-use jiff::Timestamp;
+use jiff::{RoundMode, Timestamp, TimestampRound, Unit};
 
 /// Where the app gets the current time.
 ///
@@ -22,8 +22,11 @@ impl Clock for SystemClock {
 
 /// `ts` without what's below a microsecond, toward zero: before 1970 that's later.
 pub(crate) fn to_micros(ts: Timestamp) -> Timestamp {
-    let nanos = ts.subsec_nanosecond() / 1000 * 1000;
-    Timestamp::new(ts.as_second(), nanos).expect("dropping nanoseconds stays in range")
+    let micros = TimestampRound::new()
+        .smallest(Unit::Microsecond)
+        .mode(RoundMode::Trunc);
+    ts.round(micros)
+        .expect("truncating toward zero stays in range")
 }
 
 #[cfg(test)]
