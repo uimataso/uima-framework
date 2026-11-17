@@ -58,9 +58,9 @@ impl OriginAuth {
     ///
     /// # Panics
     ///
-    /// If one of `paths` doesn't start with `/`.
+    /// If one of `paths` doesn't start with `/` or holds a `?` or `#`.
     pub fn exempt<P: AsRef<str>>(mut self, paths: impl IntoIterator<Item = P>) -> Self {
-        self.exempt_paths = self.exempt_paths.with(paths);
+        self.exempt_paths.extend(paths);
         self
     }
 

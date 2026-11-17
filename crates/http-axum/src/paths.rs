@@ -7,21 +7,22 @@ use std::sync::Arc;
 pub(crate) struct Paths(Arc<[String]>);
 
 impl Paths {
-    /// These paths and `paths`.
+    /// Adds `paths`.
     ///
     /// # Panics
     ///
-    /// If one of `paths` doesn't start with `/`, as no route's path does.
-    pub(crate) fn with<P: AsRef<str>>(&self, paths: impl IntoIterator<Item = P>) -> Self {
+    /// If one of `paths` doesn't start with `/` or holds a `?` or `#`, as no request's path does.
+    pub(crate) fn extend<P: AsRef<str>>(&mut self, paths: impl IntoIterator<Item = P>) {
         let added = paths.into_iter().map(|path| {
             let path = path.as_ref();
             assert!(
-                path.starts_with('/'),
-                "the path {path:?} doesn't start with `/`"
+                path.starts_with('/') && !path.contains(['?', '#']),
+                "the path {path:?} can't match a request's path"
             );
             path.to_owned()
         });
-        Self(self.0.iter().cloned().chain(added).collect())
+
+        self.0 = self.0.iter().cloned().chain(added).collect();
     }
 
     pub(crate) fn contains(&self, path: &str) -> bool {
@@ -38,7 +39,9 @@ mod tests {
     #[test]
     fn paths_match_exactly() {
         const PATHS: &[&str] = &["/hook"];
-        let paths = Paths::default().with(PATHS).with(vec![String::from("/b")]);
+        let mut paths = Paths::default();
+        paths.extend(PATHS);
+        paths.extend(vec![String::from("/b")]);
         check!(paths.contains("/hook"));
         check!(paths.contains("/b"));
         for other in ["/hook/", "/HOOK", "//hook", "/ho%6Fk", "/hooks", "/", ""] {
@@ -47,8 +50,10 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "the path \"hook\" doesn't start with `/`")]
-    fn a_path_without_a_leading_slash_panics() {
-        Paths::default().with(["hook"]);
+    fn a_path_that_cant_match_panics() {
+        for path in ["hook", "", "/hook?sign", "/hook#top"] {
+            let extend = || Paths::default().extend([path]);
+            check!(std::panic::catch_unwind(extend).is_err(), "{path:?}");
+        }
     }
 }

@@ -28,8 +28,8 @@
 //!
 //! A path given to [`OriginAuth::exempt`] or [`Trace::hide_query_on`] matches a request only when
 //! it is the same as the request's path as the layer sees it, the query left out. So `/healthz`
-//! doesn't match `/healthz/` or `/HEALTHZ`, and under a `Router::nest` the path leaves out the
-//! nest's prefix.
+//! doesn't match `/healthz/` or `/HEALTHZ`. A layer on a router that `Router::nest` then puts under
+//! a prefix sees the path without the prefix, and a layer on the router that nests sees it whole.
 
 mod origin_auth;
 mod paths;

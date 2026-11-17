@@ -18,6 +18,14 @@ use crate::OriginAuth;
 use crate::paths::Paths;
 
 const REQUEST_ID: HeaderName = HeaderName::from_static("x-request-id");
+/// The headers that carry credentials.
+const SENSITIVE: [HeaderName; 5] = [
+    header::AUTHORIZATION,
+    header::PROXY_AUTHORIZATION,
+    header::COOKIE,
+    header::SET_COOKIE,
+    HeaderName::from_static(OriginAuth::HEADER),
+];
 /// The longest request id kept from a request.
 const MAX_REQUEST_ID_LEN: usize = 128;
 
@@ -29,15 +37,15 @@ const MAX_REQUEST_ID_LEN: usize = 128;
 /// `method`, `uri` and `request_id`. A filter that leaves that target off, such as `warn` or
 /// `my_app=info`, leaves the span and its fields off too. Its start and finish events are at
 /// `DEBUG` under `tower_http` targets, so a filter such as `tower_http=debug` turns them on, and a
-/// 5xx response is logged at `ERROR`. The `uri` is the request's as this layer sees it, so under a
-/// `Router::nest` it leaves out the nest's prefix.
+/// 5xx response is logged at `ERROR`. The `uri` is the request's path and query, the path as the
+/// [crate docs](crate#paths) say this layer sees it.
 ///
 /// The request id is the request's `x-request-id` when that is 1 to 128 visible ASCII characters,
 /// and a new UUID otherwise, so a client can't put a long or unprintable value on every line the
-/// request logs, and the response carries it back. Headers that carry credentials,
-/// such as `authorization`, `cookie`, `set-cookie` and the [`OriginAuth`] header, are marked
-/// sensitive, so a log of them shows `Sensitive` instead of the value, in the layers and the
-/// handler inside this one and in the response it returns.
+/// request logs, and the response carries it back. Headers that carry credentials, such as
+/// `authorization`, `cookie`, `set-cookie` and the [`OriginAuth`] header, are marked sensitive, so
+/// a log of them shows `Sensitive` instead of the value. A request's are marked before the layers
+/// and the handler inside this one see them, and a response's as it leaves this layer.
 #[derive(Debug, Clone, Default)]
 pub struct Trace {
     hidden_query_paths: Paths,
@@ -53,9 +61,9 @@ impl Trace {
     ///
     /// # Panics
     ///
-    /// If one of `paths` doesn't start with `/`.
+    /// If one of `paths` doesn't start with `/` or holds a `?` or `#`.
     pub fn hide_query_on<P: AsRef<str>>(mut self, paths: impl IntoIterator<Item = P>) -> Self {
-        self.hidden_query_paths = self.hidden_query_paths.with(paths);
+        self.hidden_query_paths.extend(paths);
         self
     }
 }
@@ -64,13 +72,6 @@ impl<S> Layer<S> for Trace {
     type Service = TraceService<S>;
 
     fn layer(&self, inner: S) -> Self::Service {
-        let sensitive = [
-            header::AUTHORIZATION,
-            header::PROXY_AUTHORIZATION,
-            header::COOKIE,
-            header::SET_COOKIE,
-            HeaderName::from_static(OriginAuth::HEADER),
-        ];
         let inner = PropagateRequestIdLayer::new(REQUEST_ID).layer(inner);
         let inner = TraceLayer::new_for_http()
             .make_span_with(RequestSpan {
@@ -78,7 +79,7 @@ impl<S> Layer<S> for Trace {
             })
             .layer(inner);
         let inner = SetRequestIdLayer::new(REQUEST_ID, MakeRequestUuid).layer(inner);
-        let inner = SetSensitiveHeadersLayer::new(sensitive).layer(inner);
+        let inner = SetSensitiveHeadersLayer::new(SENSITIVE).layer(inner);
         TraceService { inner }
     }
 }
@@ -163,10 +164,9 @@ struct LoggedUri<'a> {
 impl fmt::Display for LoggedUri<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let path = self.uri.path();
-        if self.hidden_query_paths.contains(path) {
-            f.write_str(path)
-        } else {
-            fmt::Display::fmt(self.uri, f)
+        match self.uri.query() {
+            Some(query) if !self.hidden_query_paths.contains(path) => write!(f, "{path}?{query}"),
+            _ => f.write_str(path),
         }
     }
 }
@@ -184,11 +184,11 @@ mod tests {
     use axum::Router;
     use axum::body::Body;
     use axum::extract::Request;
-    use axum::http::{HeaderValue, StatusCode};
+    use axum::http::{HeaderValue, StatusCode, Version};
     use axum::response::{IntoResponse, Response};
     use axum::routing::get;
     use tower::ServiceExt as _;
-    use tracing::Level;
+    use tracing::{Level, error};
     use uima_log_tracing::testing::{CapturedEvent, LogCapture};
     use uima_testing::{assert, check};
 
@@ -276,6 +276,16 @@ mod tests {
             send(trace.clone(), Request::get(uri)).await;
             check!(span_fields(&logs)["uri"] == uri);
         }
+    }
+
+    #[tokio::test]
+    async fn the_uri_is_the_path_and_query_also_over_http2() {
+        let logs = LogCapture::start();
+
+        let request = Request::get("http://user:pw@t/span?page=2").version(Version::HTTP_2);
+        send(Trace::new(), request).await;
+
+        check!(span_fields(&logs)["uri"] == "/span?page=2");
     }
 
     #[tokio::test]
@@ -414,7 +424,6 @@ mod tests {
         let router = Router::new()
             .route("/", get(|| async { "ok" }))
             .route("/hook", get(|| async { "ok" }))
-            .route("/hooks", get(|| async { "ok" }))
             .route("/span", get(current_span))
             .route("/credentials", get(credentials))
             .route("/fail", get(fail))
@@ -452,7 +461,7 @@ mod tests {
     }
 
     async fn fail() -> StatusCode {
-        tracing::error!("the handler failed");
+        error!("the handler failed");
         StatusCode::INTERNAL_SERVER_ERROR
     }
 

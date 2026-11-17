@@ -4,7 +4,7 @@ use std::fmt;
 use std::sync::Arc;
 
 use axum::body::Body;
-use axum::http::{Method, Request, StatusCode};
+use axum::http::{HeaderValue, Method, Request, StatusCode};
 use axum::response::{IntoResponse, Response};
 use tower::Layer;
 use tower_http::validate_request::{ValidateRequest, ValidateRequestHeader};
@@ -23,8 +23,9 @@ const SAFE_METHODS: [Method; 4] = [Method::GET, Method::HEAD, Method::OPTIONS, M
 ///
 /// A request passes when its `sec-fetch-site` is `same-origin` or `none`, or, from a browser that
 /// doesn't send `sec-fetch-site`, when its `origin` names its own host exactly, the scheme left
-/// out. A request with neither header, such as one from `curl`, passes too, and one with either
-/// header holding what isn't visible ASCII is refused. A refused request gets a `403` with no
+/// out. A request with neither header, such as one from `curl`, passes too, and one whose
+/// `sec-fetch-site`, `origin` or the `host` compared with it holds what isn't visible ASCII is
+/// refused. A refused request gets a `403` with no
 /// body, or what [`refuse_with`](Self::refuse_with) returns.
 #[derive(Clone)]
 pub struct SameOrigin {
@@ -80,29 +81,43 @@ impl<B> ValidateRequest<B> for SameOrigin {
 
 fn is_same_origin<B>(request: &Request<B>) -> bool {
     let headers = request.headers();
+
     if let Some(site) = headers.get("sec-fetch-site") {
         return matches!(site.as_bytes(), b"same-origin" | b"none");
     }
+
     let Some(origin) = headers.get("origin") else {
         return true;
     };
-    let Ok(origin) = origin.to_str() else {
+
+    let Some(origin) = visible_ascii(origin) else {
         return false;
     };
+
     // The URI carries the host over HTTP/2, and wins over `host` in an absolute-form request.
     let host = request
         .uri()
         .authority()
         .map(|authority| authority.as_str())
-        .or_else(|| headers.get("host").and_then(|host| host.to_str().ok()));
+        .or_else(|| headers.get("host").and_then(visible_ascii));
+
     let origin_host = origin.split_once("://").map(|(_, host)| host);
     origin_host.is_some_and(|origin_host| Some(origin_host) == host)
+}
+
+fn visible_ascii(value: &HeaderValue) -> Option<&str> {
+    let bytes = value.as_bytes();
+    if bytes.iter().all(u8::is_ascii_graphic) {
+        value.to_str().ok()
+    } else {
+        None
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use axum::Router;
-    use axum::http::{HeaderValue, Version};
+    use axum::http::Version;
     use axum::routing::any;
     use tower::ServiceExt as _;
     use uima_testing::check;
@@ -216,6 +231,8 @@ mod tests {
             &[("sec-fetch-site", b"same-origin\xff")],
             &[("origin", b"http://t\xff"), ("host", b"t")],
             &[("origin", b"http://t"), ("host", b"t\xff")],
+            &[("origin", b"http://a b"), ("host", b"a b")],
+            &[("origin", b"http://a\tb"), ("host", b"a\tb")],
         ];
         for headers in cases {
             let mut request = Request::post("/");
