@@ -243,8 +243,15 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn isolated_databases_are_migrated_and_dont_share_rows() {
+    async fn the_server_gives_each_case_its_own_migrated_database_in_memory() {
         let postgres = TestPostgres::start(&test_migrator().await).await;
+
+        isolated_databases_are_migrated_and_dont_share_rows(&postgres).await;
+        the_server_doesnt_sync_to_disk(&postgres).await;
+        isolated_databases_have_their_own_names_even_at_once(&postgres).await;
+    }
+
+    async fn isolated_databases_are_migrated_and_dont_share_rows(postgres: &TestPostgres) {
         let first = postgres.isolated().await;
         let second = postgres.isolated().await;
 
@@ -257,9 +264,7 @@ mod tests {
         check!(names(&second).await.is_empty());
     }
 
-    #[tokio::test]
-    async fn the_server_doesnt_sync_to_disk() {
-        let postgres = TestPostgres::start(&test_migrator().await).await;
+    async fn the_server_doesnt_sync_to_disk(postgres: &TestPostgres) {
         let isolated = postgres.isolated().await;
 
         for setting in ["fsync", "synchronous_commit", "full_page_writes"] {
@@ -269,6 +274,24 @@ mod tests {
                 .unwrap();
             check!(shown == "off", "{setting}");
         }
+    }
+
+    async fn isolated_databases_have_their_own_names_even_at_once(postgres: &TestPostgres) {
+        let (first, second, third) = tokio::join!(
+            postgres.isolated(),
+            postgres.isolated(),
+            postgres.isolated()
+        );
+
+        let mut databases = std::collections::HashSet::new();
+        for isolated in [first, second, third] {
+            let database: String = sqlx::query_scalar("SELECT current_database()")
+                .fetch_one(isolated.pool())
+                .await
+                .unwrap();
+            databases.insert(database);
+        }
+        check!(databases.len() == 3);
     }
 
     #[tokio::test]
@@ -320,25 +343,5 @@ mod tests {
         check!(name.starts_with("uima-test-postgres_uima-postgres-sqlx_a.b-c-d"));
         check!(name.len() <= 128);
         check!(docker_takes(&name));
-    }
-
-    #[tokio::test]
-    async fn isolated_databases_have_their_own_names_even_at_once() {
-        let postgres = TestPostgres::start(&test_migrator().await).await;
-        let (first, second, third) = tokio::join!(
-            postgres.isolated(),
-            postgres.isolated(),
-            postgres.isolated()
-        );
-
-        let mut databases = std::collections::HashSet::new();
-        for isolated in [first, second, third] {
-            let database: String = sqlx::query_scalar("SELECT current_database()")
-                .fetch_one(isolated.pool())
-                .await
-                .unwrap();
-            databases.insert(database);
-        }
-        check!(databases.len() == 3);
     }
 }
