@@ -68,8 +68,14 @@ let
 
       # The dependencies, built once and reused by the build and the checks.
       # The check covers what clippy checks, so clippy rebuilds none of them.
+      # No `cargo test --no-run`: the tests run outside the sandbox, through
+      # `just test`.
       cargoArtifacts = craneLib.buildDepsOnly (
-        common // { cargoCheckExtraArgs = "--workspace --all-targets --all-features"; }
+        common
+        // {
+          cargoCheckExtraArgs = "--workspace --all-targets --all-features";
+          doCheck = false;
+        }
       );
 
       # The node flake.lock locks the `uima` input at, and the framework's

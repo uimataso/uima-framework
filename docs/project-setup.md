@@ -130,8 +130,9 @@ Each project's workflow runs on its own CI host, in three stages:
   volume on the Forgejo runner. A deploy job that only runs the apps skips it, since their scripts
   come from cache.nixos.org faster than the store restores.
 - **Cargo cache**: the tests compile outside the store, so cargo's downloads and `target/` are
-  cached too. The downloads may restore from an older `Cargo.lock`; `target/` only from the same
-  `Cargo.lock` and `rust-toolchain.toml`, so stale builds don't pile up.
+  cached too. Both may restore from an older `Cargo.lock`, so only the changed crates build;
+  `target/` only from the same `rust-toolchain.toml`, so the stale builds it keeps go with each new
+  toolchain.
 
 ### Image retention
 

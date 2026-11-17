@@ -57,12 +57,14 @@ jobs:
           key: cargo-registry-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
           restore-keys: cargo-registry-${{ runner.os }}-
 
-      # No restore-keys: a target/ restored for another Cargo.lock would carry
-      # stale builds into the next save.
+      # A new Cargo.lock restores the target/ of an older one on the same
+      # toolchain, so only the changed crates build. Their old builds stay in
+      # it until a new toolchain starts target/ over.
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: target
-          key: cargo-target-${{ runner.os }}-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
+          key: cargo-target-${{ runner.os }}-${{ hashFiles('rust-toolchain.toml') }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: cargo-target-${{ runner.os }}-${{ hashFiles('rust-toolchain.toml') }}-
 
       - name: CI
         run: nix develop -c just ci
