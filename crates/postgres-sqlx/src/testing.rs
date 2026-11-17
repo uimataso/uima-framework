@@ -69,12 +69,22 @@ impl TestPostgres {
         }
     }
 
-    /// A new database copied from the template.
+    /// A new database copied from the template, connected with the default config.
     ///
     /// # Panics
     ///
     /// If the database can't be created or connected to.
     pub async fn isolated(&self) -> PostgresClient {
+        self.isolated_with(&PostgresConfig::default()).await
+    }
+
+    /// A new database copied from the template, connected with `config`, so a case runs with
+    /// the app's own settings.
+    ///
+    /// # Panics
+    ///
+    /// If the database can't be created or connected to, or `config` is invalid.
+    pub async fn isolated_with(&self, config: &PostgresConfig) -> PostgresClient {
         let name = format!("case_{}", self.created.fetch_add(1, Ordering::Relaxed));
         // `name` and `TEMPLATE` are fixed identifiers, never input.
         let create = format!(r#"CREATE DATABASE "{name}" TEMPLATE "{TEMPLATE}""#);
@@ -82,7 +92,7 @@ impl TestPostgres {
             .execute(&self.admin)
             .await
             .expect("the case's database is created from the template");
-        PostgresClient::connect(&target(&self.url, &name), &PostgresConfig::default())
+        PostgresClient::connect(&target(&self.url, &name), config)
             .await
             .expect("the case's database is reachable")
     }
@@ -249,6 +259,7 @@ mod tests {
         isolated_databases_are_migrated_and_dont_share_rows(&postgres).await;
         the_server_doesnt_sync_to_disk(&postgres).await;
         isolated_databases_have_their_own_names_even_at_once(&postgres).await;
+        an_isolated_database_connects_with_the_given_config(&postgres).await;
     }
 
     async fn isolated_databases_are_migrated_and_dont_share_rows(postgres: &TestPostgres) {
@@ -292,6 +303,21 @@ mod tests {
             databases.insert(database);
         }
         check!(databases.len() == 3);
+    }
+
+    async fn an_isolated_database_connects_with_the_given_config(postgres: &TestPostgres) {
+        let config = PostgresConfig {
+            lock_timeout: Duration::from_millis(750),
+            ..PostgresConfig::default()
+        };
+        let isolated = postgres.isolated_with(&config).await;
+
+        let lock_timeout: String = sqlx::query_scalar("SHOW lock_timeout")
+            .fetch_one(isolated.pool())
+            .await
+            .unwrap();
+        check!(lock_timeout == "750ms");
+        check!(names(&isolated).await.is_empty());
     }
 
     #[tokio::test]
