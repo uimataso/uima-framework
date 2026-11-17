@@ -37,19 +37,23 @@ use tracing::info;
 mod config;
 mod connection;
 mod database_name;
+mod error;
 mod max_connections;
 mod postgres_url;
 #[cfg(feature = "testing")]
 pub mod testing;
 #[cfg(test)]
 mod tests;
+mod transaction;
 
 pub use config::PostgresConfig;
 use config::whole_millis;
 pub use connection::PostgresConnection;
 pub use database_name::DatabaseName;
+pub use error::PgContext;
 pub use max_connections::{InvalidMaxConnections, MaxConnections};
 pub use postgres_url::{PostgresUrl, PostgresUrlErrorKind};
+pub use transaction::PgTransaction;
 
 /// A pool of connections to one database.
 #[derive(Clone)]

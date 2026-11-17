@@ -17,7 +17,7 @@ uima-time-jiff = { workspace = true }
 
 # workspace dependencies
 anyhow = { workspace = true }
-tokio = { workspace = true, features = ["time"] }
+tokio = { workspace = true, features = ["sync", "time"] }
 tracing = { workspace = true }
 
 # crate-local dependencies
@@ -40,6 +40,7 @@ tokio = { workspace = true, features = [
   "rt",
   "time",
 ] }
+uima-core = { workspace = true, features = ["testing"] }
 uima-testing = { workspace = true }
 
 [lints]

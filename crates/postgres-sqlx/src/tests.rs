@@ -445,7 +445,7 @@ mod with_a_server {
             check!(let Ok(Ok(())) = migrated);
         }
         let postgres = connect(&server, "app", &PostgresConfig::default()).await;
-        check!(show(&postgres, "SELECT count(*)::text FROM _sqlx_migrations").await == "2");
+        check!(show(&postgres, "SELECT count(*)::text FROM _sqlx_migrations").await == "3");
     }
 
     #[tokio::test]
