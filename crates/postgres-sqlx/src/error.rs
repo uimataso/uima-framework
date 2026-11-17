@@ -77,17 +77,26 @@ pub(crate) fn failure(error: sqlx::Error) -> Failure {
 /// What `error` shows happened, by its SQLSTATE when the server sent one.
 fn kind(error: &sqlx::Error) -> FailureKind {
     match error {
+        // A pool turns a refused connection into `PoolTimedOut`, after retrying until the
+        // acquire timeout.
         sqlx::Error::PoolTimedOut => FailureKind::Timeout,
         sqlx::Error::Io(error) if error.kind() == io::ErrorKind::TimedOut => FailureKind::Timeout,
-        sqlx::Error::Io(_) => FailureKind::Unavailable,
+        sqlx::Error::Io(_) | sqlx::Error::PoolClosed => FailureKind::Unavailable,
         sqlx::Error::Database(error) => match error.code().as_deref() {
             // serialization_failure, deadlock_detected
             Some("40001" | "40P01") => FailureKind::Conflict,
-            // lock_not_available, query_canceled (statement_timeout)
+            // lock_not_available, query_canceled (statement_timeout or a cancel request)
             Some("55P03" | "57014") => FailureKind::Timeout,
-            // too_many_connections, admin_shutdown, crash_shutdown, cannot_connect_now
-            Some("53300" | "57P01" | "57P02" | "57P03") => FailureKind::Unavailable,
-            // connection_exception and its subclasses
+            // protocol_violation, a bug in the client rather than a lost connection
+            Some("08P01") => FailureKind::Other,
+            // read_only_sql_transaction, as after a failover; idle_in_transaction_session_timeout;
+            // insufficient_resources, out_of_memory, too_many_connections; admin_shutdown,
+            // crash_shutdown, cannot_connect_now, idle_session_timeout
+            Some(
+                "25006" | "25P03" | "53000" | "53200" | "53300" | "57P01" | "57P02" | "57P03"
+                | "57P05",
+            ) => FailureKind::Unavailable,
+            // connection_exception and its subclasses, such as dblink failing to connect
             Some(code) if code.starts_with("08") => FailureKind::Unavailable,
             _ => FailureKind::Other,
         },
@@ -110,8 +119,14 @@ mod tests {
         }
     }
 
+    #[test]
+    fn a_closed_pool_is_unavailable_and_a_missing_row_isnt() {
+        check!(failure(sqlx::Error::PoolClosed).kind() == FailureKind::Unavailable);
+        check!(failure(sqlx::Error::RowNotFound).kind() == FailureKind::Other);
+    }
+
     #[tokio::test]
-    async fn a_server_it_cant_reach_is_unavailable() {
+    async fn a_refused_socket_is_unavailable() {
         let error = sqlx::PgConnection::connect("postgres://app@127.0.0.1:1")
             .await
             .unwrap_err();
@@ -166,10 +181,18 @@ mod tests {
                 ("40P01", FailureKind::Conflict),
                 ("55P03", FailureKind::Timeout),
                 ("57014", FailureKind::Timeout),
-                ("08006", FailureKind::Unavailable),
+                ("08001", FailureKind::Unavailable),
+                ("25006", FailureKind::Unavailable),
+                ("25P03", FailureKind::Unavailable),
+                ("53000", FailureKind::Unavailable),
+                ("53200", FailureKind::Unavailable),
                 ("53300", FailureKind::Unavailable),
                 ("57P01", FailureKind::Unavailable),
+                ("57P02", FailureKind::Unavailable),
                 ("57P03", FailureKind::Unavailable),
+                ("57P05", FailureKind::Unavailable),
+                ("08P01", FailureKind::Other),
+                ("0A000", FailureKind::Other),
                 ("23505", FailureKind::Other),
                 ("42601", FailureKind::Other),
             ] {
@@ -213,17 +236,12 @@ mod tests {
         }
 
         #[tokio::test]
-        async fn a_contract_maps_the_errors_it_names() {
+        async fn a_contract_maps_the_errors_it_names_and_leaves_the_rest_as_failures() {
             let server = TestPostgres::start(&test_migrator().await).await;
             let postgres = with_members(&server).await;
 
             check!(let Err(PortError::Contract(MemberError::NoGroup)) = add_member(&postgres).await);
-        }
 
-        #[tokio::test]
-        async fn a_contract_leaves_the_errors_it_doesnt_name_as_failures() {
-            let server = TestPostgres::start(&test_migrator().await).await;
-            let postgres = with_members(&server).await;
             sqlx::raw_sql("INSERT INTO groups VALUES (7); INSERT INTO members VALUES (7)")
                 .execute(postgres.pool())
                 .await
