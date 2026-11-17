@@ -33,7 +33,8 @@ const MAX_REQUEST_ID_LEN: usize = 128;
 /// `Router::nest` it leaves out the nest's prefix.
 ///
 /// The request id is the request's `x-request-id` when that is 1 to 128 visible ASCII characters,
-/// and a new UUID otherwise, and the response carries it back. Headers that carry credentials,
+/// and a new UUID otherwise, so a client can't put a long or unprintable value on every line the
+/// request logs, and the response carries it back. Headers that carry credentials,
 /// such as `authorization`, `cookie`, `set-cookie` and the [`OriginAuth`] header, are marked
 /// sensitive, so a log of them shows `Sensitive` instead of the value, in the layers and the
 /// handler inside this one and in the response it returns.
@@ -94,17 +95,6 @@ impl<S> fmt::Debug for TraceService<S> {
     }
 }
 
-type Stack<S> = SetSensitiveHeaders<
-    SetRequestId<
-        tower_http::trace::Trace<
-            PropagateRequestId<S>,
-            SharedClassifier<ServerErrorsAsFailures>,
-            RequestSpan,
-        >,
-        MakeRequestUuid,
-    >,
->;
-
 impl<S, B> Service<Request<B>> for TraceService<S>
 where
     Stack<S>: Service<Request<B>>,
@@ -125,6 +115,17 @@ where
         self.inner.call(request)
     }
 }
+
+type Stack<S> = SetSensitiveHeaders<
+    SetRequestId<
+        tower_http::trace::Trace<
+            PropagateRequestId<S>,
+            SharedClassifier<ServerErrorsAsFailures>,
+            RequestSpan,
+        >,
+        MakeRequestUuid,
+    >,
+>;
 
 /// `tower_http`'s default span at `INFO`, minus the query on `hidden_query_paths`, plus the
 /// request id.
@@ -376,6 +377,8 @@ mod tests {
 
     #[tokio::test]
     async fn wrapping_a_whole_router_sees_the_full_path() {
+        // Such a service returns tower-http's body, so `axum::serve` needs it mapped to axum's
+        // `Response` first.
         let nested = Router::new().nest("/api", Router::new().route("/hook", get(|| async {})));
         let service = Trace::new().hide_query_on(["/api/hook"]).layer(nested);
         let logs = LogCapture::start();
@@ -385,6 +388,21 @@ mod tests {
 
         check!(response.status() == StatusCode::OK);
         check!(!logs.mentions("s3cret"));
+    }
+
+    #[tokio::test]
+    async fn the_handler_tells_whether_credentials_are_sensitive() {
+        let mut headers = HeaderMap::new();
+        for name in [
+            "authorization",
+            "proxy-authorization",
+            "cookie",
+            "x-origin-auth",
+        ] {
+            headers.insert(name, HeaderValue::from_static("v"));
+        }
+        let response = credentials(headers).await.into_response();
+        check!(response.status() == StatusCode::IM_A_TEAPOT);
     }
 
     #[test]

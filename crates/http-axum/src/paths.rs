@@ -11,7 +11,7 @@ impl Paths {
     ///
     /// # Panics
     ///
-    /// If one of `paths` doesn't start with `/`, since it could never match.
+    /// If one of `paths` doesn't start with `/`, as no route's path does.
     pub(crate) fn with<P: AsRef<str>>(&self, paths: impl IntoIterator<Item = P>) -> Self {
         let added = paths.into_iter().map(|path| {
             let path = path.as_ref();

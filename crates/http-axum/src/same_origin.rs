@@ -23,8 +23,9 @@ const SAFE_METHODS: [Method; 4] = [Method::GET, Method::HEAD, Method::OPTIONS, M
 ///
 /// A request passes when its `sec-fetch-site` is `same-origin` or `none`, or, from a browser that
 /// doesn't send `sec-fetch-site`, when its `origin` names its own host exactly, the scheme left
-/// out. A request with neither header, such as one from `curl`, passes too. A refused request gets
-/// a bare `403`, or what [`refuse_with`](Self::refuse_with) returns.
+/// out. A request with neither header, such as one from `curl`, passes too, and one with either
+/// header holding what isn't visible ASCII is refused. A refused request gets a `403` with no
+/// body, or what [`refuse_with`](Self::refuse_with) returns.
 #[derive(Clone)]
 pub struct SameOrigin {
     refusal: Arc<dyn Fn() -> Response + Send + Sync>,
@@ -78,24 +79,22 @@ impl<B> ValidateRequest<B> for SameOrigin {
 }
 
 fn is_same_origin<B>(request: &Request<B>) -> bool {
-    let header = |name| {
-        request
-            .headers()
-            .get(name)
-            .and_then(|value| value.to_str().ok())
-    };
-    if let Some(site) = header("sec-fetch-site") {
-        return matches!(site, "same-origin" | "none");
+    let headers = request.headers();
+    if let Some(site) = headers.get("sec-fetch-site") {
+        return matches!(site.as_bytes(), b"same-origin" | b"none");
     }
-    let Some(origin) = header("origin") else {
+    let Some(origin) = headers.get("origin") else {
         return true;
+    };
+    let Ok(origin) = origin.to_str() else {
+        return false;
     };
     // The URI carries the host over HTTP/2, and wins over `host` in an absolute-form request.
     let host = request
         .uri()
         .authority()
         .map(|authority| authority.as_str())
-        .or_else(|| header("host"));
+        .or_else(|| headers.get("host").and_then(|host| host.to_str().ok()));
     let origin_host = origin.split_once("://").map(|(_, host)| host);
     origin_host.is_some_and(|origin_host| Some(origin_host) == host)
 }
@@ -103,7 +102,7 @@ fn is_same_origin<B>(request: &Request<B>) -> bool {
 #[cfg(test)]
 mod tests {
     use axum::Router;
-    use axum::http::Version;
+    use axum::http::{HeaderValue, Version};
     use axum::routing::any;
     use tower::ServiceExt as _;
     use uima_testing::check;
@@ -127,6 +126,8 @@ mod tests {
                 false,
             ),
             (&[("origin", "http://t:8080"), ("host", "t:8080")], true),
+            (&[("origin", "https://t"), ("host", "t")], true),
+            (&[("origin", "https://t:8443"), ("host", "t:8443")], true),
             (&[("origin", "https://T:8080"), ("host", "t:8080")], false),
             (&[("origin", "http://t:8080"), ("host", "t")], false),
             (&[("origin", "http://evil"), ("host", "t")], false),
@@ -169,7 +170,7 @@ mod tests {
 
     #[tokio::test]
     async fn the_host_comes_from_the_uri_over_http2() {
-        // What hyper hands axum for an HTTP/2 request: the authority in the URI, no `host`.
+        // What hyper hands axum for an HTTP/2 request, with the authority in the URI and no `host`.
         let request = |origin| {
             Request::post("http://t:8080/")
                 .version(Version::HTTP_2)
@@ -204,6 +205,25 @@ mod tests {
             check!(response.status() == StatusCode::FORBIDDEN, "{uri}");
             let body = axum::body::to_bytes(response.into_body(), 1024).await;
             check!(body.unwrap().is_empty(), "{uri}");
+        }
+        let allowed = Request::post("/missing").header("sec-fetch-site", "same-origin");
+        check!(send(SameOrigin::new(), allowed).await.status() == StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn a_header_that_isnt_visible_ascii_is_refused() {
+        let cases: &[&[(&str, &[u8])]] = &[
+            &[("sec-fetch-site", b"same-origin\xff")],
+            &[("origin", b"http://t\xff"), ("host", b"t")],
+            &[("origin", b"http://t"), ("host", b"t\xff")],
+        ];
+        for headers in cases {
+            let mut request = Request::post("/");
+            for (name, value) in *headers {
+                request = request.header(*name, HeaderValue::from_bytes(value).unwrap());
+            }
+            let status = send(SameOrigin::new(), request).await.status();
+            check!(status == StatusCode::FORBIDDEN, "{headers:?}");
         }
     }
 

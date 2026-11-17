@@ -20,7 +20,9 @@ uima_core::secret!(
 );
 
 /// Refuses a request that doesn't carry the secret the proxy in front, such as Cloudflare, adds in
-/// the [`HEADER`](Self::HEADER) header, so a request sent straight to the host gets a bare `403`.
+/// the [`HEADER`](Self::HEADER) header, so a request sent straight to the host gets a `403` with
+/// no body. Under `Router::layer`, axum adds an `allow` header to a refusal on a route that has
+/// other methods, naming them, as it does through the proxy to anyone.
 ///
 /// A request that passes goes on without the header, so the secret doesn't reach the layers and
 /// the handler inside this one.
@@ -170,6 +172,18 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn under_router_layer_axum_names_the_routes_methods() {
+        let auth = OriginAuth::new(Some(secret(SECRET)));
+        let router = Router::new().route("/", get(|| async { "ok" })).layer(auth);
+
+        let request = Request::post("/").body(Body::empty()).unwrap();
+        let response = router.oneshot(request).await.unwrap();
+
+        check!(response.status() == StatusCode::FORBIDDEN);
+        check!(response.headers()["allow"] == "GET,HEAD");
+    }
+
+    #[tokio::test]
     async fn exempt_paths_match_exactly_and_add_up() {
         let auth = OriginAuth::new(Some(secret(SECRET)))
             .exempt(["/healthz"])
@@ -208,7 +222,8 @@ mod tests {
         let auth = OriginAuth::new(None);
         check!(logs.has_message(Level::WARN, "no origin auth secret"));
         check!(send(auth.clone(), "/", None).await == StatusCode::OK);
-        check!(send(auth, "/", Some("anything")).await == StatusCode::OK);
+        check!(send(auth.clone(), "/", Some("anything")).await == StatusCode::OK);
+        check!(send(auth, "/header", Some("anything")).await == StatusCode::OK);
     }
 
     #[test]
@@ -238,6 +253,14 @@ mod tests {
         for invalid in invalid {
             check!(OriginSecret::new(&invalid).is_err(), "{invalid:?}");
         }
+    }
+
+    #[tokio::test]
+    async fn the_handler_tells_whether_the_header_is_left_on() {
+        let mut headers = HeaderMap::new();
+        check!(header_is_gone(headers.clone()).await == StatusCode::OK);
+        headers.insert("x-origin-auth", "s".parse().unwrap());
+        check!(header_is_gone(headers).await == StatusCode::IM_A_TEAPOT);
     }
 
     #[test]

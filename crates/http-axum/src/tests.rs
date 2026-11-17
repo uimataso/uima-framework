@@ -4,6 +4,7 @@ use std::task::{Context, Poll, Waker};
 use axum::Router;
 use axum::body::Body;
 use axum::http::{Request, Response, StatusCode};
+use axum::response::IntoResponse as _;
 use axum::routing::post;
 use tower::{Layer as _, Service, ServiceBuilder, ServiceExt as _};
 use uima_log_tracing::testing::LogCapture;
@@ -116,4 +117,26 @@ impl Service<Request<Body>> for Readiness {
     fn call(&mut self, _: Request<Body>) -> Self::Future {
         std::future::ready(Ok(Response::default()))
     }
+}
+
+#[tokio::test]
+async fn origin_auth_outside_same_origin_refuses_a_bypass_with_no_body() {
+    let secret = OriginSecret::new(SECRET).unwrap();
+    let same_origin =
+        SameOrigin::new().refuse_with(|| (StatusCode::IM_A_TEAPOT, "go away").into_response());
+    let router: Router = Router::new().route("/", post(|| async { "ok" })).layer(
+        ServiceBuilder::new()
+            .layer(OriginAuth::new(Some(secret)))
+            .layer(same_origin),
+    );
+    let request = Request::post("/")
+        .header("sec-fetch-site", "cross-site")
+        .body(Body::empty())
+        .unwrap();
+
+    let response = router.oneshot(request).await.unwrap();
+
+    check!(response.status() == StatusCode::FORBIDDEN);
+    let body = axum::body::to_bytes(response.into_body(), 1024).await;
+    check!(body.unwrap().is_empty());
 }

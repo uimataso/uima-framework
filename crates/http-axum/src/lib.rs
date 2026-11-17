@@ -19,7 +19,7 @@
 //!
 //! In a `ServiceBuilder` the first layer is the outermost and sees a request first. Put [`Trace`]
 //! first to log every request, refused ones included, and [`OriginAuth`] before [`SameOrigin`], so
-//! a request that bypasses the proxy gets a bare `403` and not the service's own refusal.
+//! a request that bypasses the proxy gets a `403` with no body and not the service's own refusal.
 //! `Router::layer` wraps the routes the router has so far, so call it after adding them.
 //! [`OriginAuth`] and [`SameOrigin`] go around a service that returns axum's `Response`, as
 //! routes do.
