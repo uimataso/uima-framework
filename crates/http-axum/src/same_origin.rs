@@ -25,8 +25,8 @@ const SAFE_METHODS: [Method; 4] = [Method::GET, Method::HEAD, Method::OPTIONS, M
 /// doesn't send `sec-fetch-site`, when its `origin` names its own host exactly, the scheme left
 /// out. A request with neither header, such as one from `curl`, passes too, and one whose
 /// `sec-fetch-site`, `origin` or the `host` compared with it holds what isn't visible ASCII is
-/// refused. A refused request gets a `403` with no
-/// body, or what [`refuse_with`](Self::refuse_with) returns.
+/// refused. A refused request gets a `403` with no body, or what
+/// [`refuse_with`](Self::refuse_with) returns.
 #[derive(Clone)]
 pub struct SameOrigin {
     refusal: Arc<dyn Fn() -> Response + Send + Sync>,
