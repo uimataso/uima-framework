@@ -2,7 +2,8 @@
 
 Guidelines for agents (and humans) working in this repo.
 
-uima-framework holds the shared Rust crates, style guide, CI and nix setup for my services:
+uima-framework is the framework my services are built on, so a service writes only its business
+code and its vendor integrations. It holds the Rust crates, style guide, CI and nix setup for
 sowah, nova-el, techo and genkan.
 
 - How to write the code: `docs/style-guide/`.
@@ -18,8 +19,9 @@ sowah, nova-el, techo and genkan.
   only. Never copy files from them; reuse their test cases as the spec for the rewrite.
 - **Common things only.** No app-specific error variants, table names, routes or metric prefixes;
   take them as parameters or leave them in the app.
-- **Extract what services share.** A crate holds what more than one service needs, today or
-  once migrated.
+- **Own everything but the business.** The framework holds what a service needs that isn't its
+  business: plumbing, wiring and infrastructure, even when only one service has it today. Domain
+  rules, use cases, routes and vendor integrations stay in the service.
 
 ## Checks
 
