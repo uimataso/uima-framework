@@ -169,7 +169,7 @@ mod tests {
 
         use super::*;
         use crate::testing::{TestPostgres, test_migrator};
-        use crate::{Postgres, PostgresConfig, PostgresConnection};
+        use crate::{PostgresClient, PostgresConfig, PostgresTarget};
 
         #[tokio::test]
         async fn each_sqlstate_takes_its_kind() {
@@ -210,7 +210,7 @@ mod tests {
             NoGroup,
         }
 
-        async fn add_member(postgres: &Postgres) -> PortResult<(), MemberError> {
+        async fn add_member(postgres: &PostgresClient) -> PortResult<(), MemberError> {
             sqlx::query("INSERT INTO members (group_id) VALUES (7)")
                 .execute(postgres.pool())
                 .await
@@ -223,7 +223,7 @@ mod tests {
             Ok(())
         }
 
-        async fn with_members(server: &TestPostgres) -> Postgres {
+        async fn with_members(server: &TestPostgres) -> PostgresClient {
             let postgres = server.isolated().await;
             sqlx::raw_sql(
                 "CREATE TABLE groups (id INT PRIMARY KEY); \
@@ -258,7 +258,7 @@ mod tests {
         #[tokio::test]
         async fn a_lock_held_past_the_lock_timeout_is_a_timeout() {
             let server = TestPostgres::start(&test_migrator().await).await;
-            let connection = PostgresConnection {
+            let target = PostgresTarget {
                 url: server.url().clone(),
                 database: crate::DatabaseName::new("app").unwrap(),
             };
@@ -266,7 +266,7 @@ mod tests {
                 lock_timeout: Duration::from_millis(200),
                 ..PostgresConfig::default()
             };
-            let postgres = Postgres::connect(&connection, &config).await.unwrap();
+            let postgres = PostgresClient::connect(&target, &config).await.unwrap();
             sqlx::raw_sql(
                 "CREATE TABLE locked (id INT PRIMARY KEY); INSERT INTO locked VALUES (1)",
             )

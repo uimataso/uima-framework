@@ -6,16 +6,16 @@
 //! # async fn run() -> anyhow::Result<()> {
 //! use sqlx::migrate::Migrator;
 //! use uima_config::Env;
-//! use uima_postgres_sqlx::{Postgres, PostgresConfig, PostgresConnection};
+//! use uima_postgres_sqlx::{PostgresClient, PostgresConfig, PostgresTarget};
 //!
 //! # static MIGRATOR: Migrator = Migrator::DEFAULT;
 //! // static MIGRATOR: Migrator = sqlx::migrate!("./migrations");
 //!
 //! let env = Env::from_process();
-//! let connection = PostgresConnection::from_env(&env, "POSTGRES", "app")?;
+//! let target = PostgresTarget::from_env(&env, "POSTGRES", "app")?;
 //! let config = PostgresConfig::default().with_env(&env, "POSTGRES")?;
 //!
-//! let postgres = Postgres::connect(&connection, &config).await?;
+//! let postgres = PostgresClient::connect(&target, &config).await?;
 //! postgres.migrate(&MIGRATOR).await?;
 //! # Ok(())
 //! # }
@@ -35,11 +35,11 @@ use sqlx::{AssertSqlSafe, Connection as _, PgConnection, PgPool};
 use tracing::info;
 
 mod config;
-mod connection;
 mod database_name;
 mod error;
 mod max_connections;
 mod postgres_url;
+mod target;
 #[cfg(feature = "testing")]
 pub mod testing;
 #[cfg(test)]
@@ -48,37 +48,34 @@ mod transaction;
 
 pub use config::PostgresConfig;
 use config::whole_millis;
-pub use connection::PostgresConnection;
 pub use database_name::DatabaseName;
 pub use error::PgContext;
 pub use max_connections::{InvalidMaxConnections, MaxConnections};
 pub use postgres_url::{PostgresUrl, PostgresUrlErrorKind};
-pub use transaction::PgTransaction;
+pub use target::PostgresTarget;
+pub use transaction::PostgresTransaction;
 
 /// A pool of connections to one database.
 #[derive(Clone)]
-pub struct Postgres {
+pub struct PostgresClient {
     pool: PgPool,
 }
 
-impl Postgres {
+impl PostgresClient {
     /// Connects, creating the database when it doesn't exist. Fails for a config value its
     /// field's doc doesn't allow.
     ///
     /// Connect directly or through a pooler in session mode. A pooler in transaction mode drops
     /// `lock_timeout` and the migration lock with each transaction.
-    pub async fn connect(
-        connection: &PostgresConnection,
-        config: &PostgresConfig,
-    ) -> anyhow::Result<Self> {
-        let PostgresConnection { url, database } = connection;
+    pub async fn connect(target: &PostgresTarget, config: &PostgresConfig) -> anyhow::Result<Self> {
+        let PostgresTarget { url, database } = target;
         config.validate()?;
         let options = url
             .connect_options(database)
             .with_context(|| format!("invalid postgres url {url}"))?;
 
-        if !database_exists(connection, &options, config.acquire_timeout).await? {
-            create_database(connection, &options, config.acquire_timeout).await?;
+        if !database_exists(target, &options, config.acquire_timeout).await? {
+            create_database(target, &options, config.acquire_timeout).await?;
         }
 
         let pool = PgPoolOptions::new()
@@ -128,27 +125,27 @@ impl Postgres {
     }
 }
 
-impl fmt::Debug for Postgres {
+impl fmt::Debug for PostgresClient {
     /// Shows the database, not the connect options, which hold the password.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("Postgres")
+        f.debug_struct("PostgresClient")
             .field("database", &self.pool.connect_options().get_database())
             .finish_non_exhaustive()
     }
 }
 
-/// Whether `connection`'s database exists, found by connecting to it, so a user that can't reach
+/// Whether `target`'s database exists, found by connecting to it, so a user that can't reach
 /// the `postgres` maintenance database, as on some hosted servers, works when its database
 /// already exists.
 async fn database_exists(
-    connection: &PostgresConnection,
+    target: &PostgresTarget,
     options: &PgConnectOptions,
     timeout: Duration,
 ) -> anyhow::Result<bool> {
     /// SQLSTATE `invalid_catalog_name`, for a database that doesn't exist.
     const MISSING_DATABASE: &str = "3D000";
 
-    let PostgresConnection { url, database } = connection;
+    let PostgresTarget { url, database } = target;
     match connect_within(options, timeout).await {
         Ok(probe) => {
             let _ = probe.close().await;
@@ -161,10 +158,10 @@ async fn database_exists(
     }
 }
 
-/// Creates `connection`'s database from the `postgres` maintenance database, taking one another
+/// Creates `target`'s database from the `postgres` maintenance database, taking one another
 /// instance created first as created, and gives up after `timeout`.
 async fn create_database(
-    connection: &PostgresConnection,
+    target: &PostgresTarget,
     options: &PgConnectOptions,
     timeout: Duration,
 ) -> anyhow::Result<()> {
@@ -172,7 +169,7 @@ async fn create_database(
     /// `unique_violation` when both instances got past Postgres' own check.
     const CREATED_ELSEWHERE: [&str; 2] = ["42P04", "23505"];
 
-    let PostgresConnection { url, database } = connection;
+    let PostgresTarget { url, database } = target;
     let created = within(timeout, async {
         let mut maintenance =
             PgConnection::connect_with(&options.clone().database("postgres")).await?;

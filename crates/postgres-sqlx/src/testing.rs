@@ -10,7 +10,7 @@ use testcontainers::{ContainerAsync, ContainerRequest, GenericImage, ImageExt as
 
 use uima_core::Uuid;
 
-use crate::{DatabaseName, Postgres, PostgresConfig, PostgresConnection, PostgresUrl};
+use crate::{DatabaseName, PostgresClient, PostgresConfig, PostgresTarget, PostgresUrl};
 
 /// The superuser's password, distinct so a test can check it isn't shown.
 pub(crate) const PASSWORD: &str = "pg-test-password";
@@ -57,7 +57,7 @@ impl TestPostgres {
         let url = server_url(&container).await;
         migrate_template(&url, migrator).await;
 
-        let admin = Postgres::connect(&connection(&url, "postgres"), &PostgresConfig::default())
+        let admin = PostgresClient::connect(&target(&url, "postgres"), &PostgresConfig::default())
             .await
             .expect("the postgres database is reachable");
         Self {
@@ -73,7 +73,7 @@ impl TestPostgres {
     /// # Panics
     ///
     /// If the database can't be created or connected to.
-    pub async fn isolated(&self) -> Postgres {
+    pub async fn isolated(&self) -> PostgresClient {
         let name = format!("case_{}", self.created.fetch_add(1, Ordering::Relaxed));
         // `name` and `TEMPLATE` are fixed identifiers, never input.
         let create = format!(r#"CREATE DATABASE "{name}" TEMPLATE "{TEMPLATE}""#);
@@ -81,7 +81,7 @@ impl TestPostgres {
             .execute(&self.admin)
             .await
             .expect("the case's database is created from the template");
-        Postgres::connect(&connection(&self.url, &name), &PostgresConfig::default())
+        PostgresClient::connect(&target(&self.url, &name), &PostgresConfig::default())
             .await
             .expect("the case's database is reachable")
     }
@@ -160,7 +160,7 @@ async fn server_url(container: &ContainerAsync<GenericImage>) -> PostgresUrl {
 
 /// Creates the template database and runs `migrator` on it.
 async fn migrate_template(url: &PostgresUrl, migrator: &Migrator) {
-    let template = Postgres::connect(&connection(url, TEMPLATE), &PostgresConfig::default())
+    let template = PostgresClient::connect(&target(url, TEMPLATE), &PostgresConfig::default())
         .await
         .expect("the template database is created");
     template
@@ -171,9 +171,9 @@ async fn migrate_template(url: &PostgresUrl, migrator: &Migrator) {
     template.pool().close().await;
 }
 
-/// The connection to `database` on the server at `url`.
-fn connection(url: &PostgresUrl, database: &str) -> PostgresConnection {
-    PostgresConnection {
+/// `database` on the server at `url`.
+fn target(url: &PostgresUrl, database: &str) -> PostgresTarget {
+    PostgresTarget {
         url: url.clone(),
         database: DatabaseName::new(database).expect("a test database's name is valid"),
     }
@@ -192,7 +192,7 @@ mod tests {
 
     use super::*;
 
-    async fn names(postgres: &Postgres) -> Vec<String> {
+    async fn names(postgres: &PostgresClient) -> Vec<String> {
         sqlx::query_scalar("SELECT name FROM users ORDER BY id")
             .fetch_all(postgres.pool())
             .await

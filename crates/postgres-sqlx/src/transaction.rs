@@ -1,10 +1,10 @@
-//! [`PgTransaction`], a Postgres transaction as a [`UnitOfWork`].
+//! [`PostgresTransaction`], a Postgres transaction as a [`UnitOfWork`].
 
 use sqlx::PgConnection;
 use tokio::sync::{MappedMutexGuard, Mutex, MutexGuard};
 use uima_core::{Failure, HasUnitOfWork, UnitOfWork};
 
-use crate::Postgres;
+use crate::PostgresClient;
 use crate::error::failure;
 
 /// A transaction on one pool connection, which rolls back when dropped without `commit`.
@@ -12,31 +12,32 @@ use crate::error::failure;
 /// An app implements its repos on it as on its context, reaching the connection through
 /// [`conn`](Self::conn).
 #[derive(Debug)]
-pub struct PgTransaction {
+pub struct PostgresTransaction {
     tx: Mutex<sqlx::Transaction<'static, sqlx::Postgres>>,
 }
 
-impl PgTransaction {
+impl PostgresTransaction {
     /// The transaction's connection, held until the guard drops. Another `conn` on the same
     /// transaction waits for that, so drop the guard before calling another of its methods.
     ///
-    /// A setting changed on it follows the rule on [`Postgres::pool`]. Take an advisory lock with
-    /// `pg_advisory_xact_lock`, since a session lock stays on the connection after the transaction.
+    /// A setting changed on it follows the rule on [`PostgresClient::pool`]. Take an advisory lock
+    /// with `pg_advisory_xact_lock`, since a session lock stays on the connection after the
+    /// transaction.
     pub async fn conn(&self) -> MappedMutexGuard<'_, PgConnection> {
         MutexGuard::map(self.tx.lock().await, |tx| &mut **tx)
     }
 }
 
-impl HasUnitOfWork for Postgres {
-    type Uow = PgTransaction;
+impl HasUnitOfWork for PostgresClient {
+    type Uow = PostgresTransaction;
 
-    async fn begin(&self) -> Result<PgTransaction, Failure> {
+    async fn begin(&self) -> Result<PostgresTransaction, Failure> {
         let tx = self.pool.begin().await.map_err(failure)?;
-        Ok(PgTransaction { tx: Mutex::new(tx) })
+        Ok(PostgresTransaction { tx: Mutex::new(tx) })
     }
 }
 
-impl UnitOfWork for PgTransaction {
+impl UnitOfWork for PostgresTransaction {
     /// Fails when a statement failed earlier, since Postgres then answers `COMMIT` by rolling
     /// back without an error. A deferred constraint fails here as a [`Failure`], so a port whose
     /// contract names it checks it first with `SET CONSTRAINTS ... IMMEDIATE`.
@@ -62,12 +63,12 @@ mod tests {
 
     use super::*;
     use crate::testing::{TestPostgres, test_migrator};
-    use crate::{DatabaseName, MaxConnections, PostgresConfig, PostgresConnection};
+    use crate::{DatabaseName, MaxConnections, PostgresConfig, PostgresTarget};
 
     const WRITE: &str = "INSERT INTO probes (key) VALUES ($1::uuid)";
     const EXISTS: &str = "SELECT EXISTS (SELECT 1 FROM probes WHERE key = $1::uuid)";
 
-    impl Probe for Postgres {
+    impl Probe for PostgresClient {
         async fn write(&self, key: Uuid) -> anyhow::Result<()> {
             sqlx::query(WRITE)
                 .bind(key.to_string())
@@ -84,7 +85,7 @@ mod tests {
         }
     }
 
-    impl Probe for PgTransaction {
+    impl Probe for PostgresTransaction {
         async fn write(&self, key: Uuid) -> anyhow::Result<()> {
             sqlx::query(WRITE)
                 .bind(key.to_string())
@@ -129,7 +130,7 @@ mod tests {
     #[tokio::test]
     async fn begin_gives_up_on_a_full_pool_as_a_timeout() {
         let server = TestPostgres::start(&test_migrator().await).await;
-        let connection = PostgresConnection {
+        let target = PostgresTarget {
             url: server.url().clone(),
             database: DatabaseName::new("app").unwrap(),
         };
@@ -137,7 +138,7 @@ mod tests {
             max_connections: MaxConnections::new(1).unwrap(),
             ..PostgresConfig::default()
         };
-        let postgres = Postgres::connect(&connection, &config).await.unwrap();
+        let postgres = PostgresClient::connect(&target, &config).await.unwrap();
 
         let _held = postgres.pool().acquire().await.unwrap();
         let error = postgres.uow("create group").await.unwrap_err();
@@ -146,7 +147,7 @@ mod tests {
     }
 
     /// A unit of work whose connection the server has closed.
-    async fn cut_off(postgres: &Postgres) -> ScopedUow<PgTransaction> {
+    async fn cut_off(postgres: &PostgresClient) -> ScopedUow<PostgresTransaction> {
         let uow = postgres.uow("create group").await.unwrap();
         let pid: i32 = sqlx::query_scalar("SELECT pg_backend_pid()")
             .fetch_one(&mut *uow.conn().await)
@@ -176,7 +177,7 @@ mod tests {
     }
 
     /// A serializable unit of work that has read the probes.
-    async fn serializable(postgres: &Postgres) -> ScopedUow<PgTransaction> {
+    async fn serializable(postgres: &PostgresClient) -> ScopedUow<PostgresTransaction> {
         let uow = postgres.uow("create group").await.unwrap();
         let mut conn = uow.conn().await;
         sqlx::query("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE")

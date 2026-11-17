@@ -10,7 +10,7 @@ async fn connect_fails_on_a_server_it_cant_reach() {
         "postgres://app:s3cr3t@127.0.0.1:1",
         "postgres://app:s3cr3t@10.255.255.1",
     ] {
-        let connection = PostgresConnection {
+        let target = PostgresTarget {
             url: url.parse().unwrap(),
             database: DatabaseName::new("app").unwrap(),
         };
@@ -21,7 +21,7 @@ async fn connect_fails_on_a_server_it_cant_reach() {
 
         let error = tokio::time::timeout(
             Duration::from_secs(5),
-            Postgres::connect(&connection, &config),
+            PostgresClient::connect(&target, &config),
         )
         .await
         .expect("connect gives up within its acquire timeout")
@@ -38,7 +38,7 @@ async fn connect_fails_on_a_server_it_cant_reach() {
 
 #[tokio::test]
 async fn connect_rejects_a_lock_timeout_postgres_cant_take() {
-    let connection = PostgresConnection {
+    let target = PostgresTarget {
         url: "postgres://app@127.0.0.1:1".parse().unwrap(),
         database: DatabaseName::new("app").unwrap(),
     };
@@ -47,7 +47,7 @@ async fn connect_rejects_a_lock_timeout_postgres_cant_take() {
         ..PostgresConfig::default()
     };
 
-    let error = Postgres::connect(&connection, &config).await.unwrap_err();
+    let error = PostgresClient::connect(&target, &config).await.unwrap_err();
     let chain = format!("{error:#}");
     check!(chain.contains("lock_timeout"), "{chain}");
     check!(chain.contains("2147483647ms"), "{chain}");
@@ -56,7 +56,7 @@ async fn connect_rejects_a_lock_timeout_postgres_cant_take() {
 
 #[tokio::test]
 async fn connect_rejects_an_acquire_timeout_it_cant_wait() {
-    let connection = PostgresConnection {
+    let target = PostgresTarget {
         url: "postgres://app@127.0.0.1:1".parse().unwrap(),
         database: DatabaseName::new("app").unwrap(),
     };
@@ -66,7 +66,7 @@ async fn connect_rejects_an_acquire_timeout_it_cant_wait() {
             ..PostgresConfig::default()
         };
 
-        let error = Postgres::connect(&connection, &config).await.unwrap_err();
+        let error = PostgresClient::connect(&target, &config).await.unwrap_err();
         let chain = format!("{error:#}");
         check!(chain.contains("acquire_timeout"), "{chain}");
         check!(!chain.contains("failed to connect"), "{chain}");
@@ -80,12 +80,16 @@ mod with_a_server {
     use super::*;
     use crate::testing::{TestPostgres, test_migrator};
 
-    async fn connect(postgres: &TestPostgres, database: &str, config: &PostgresConfig) -> Postgres {
-        let connection = PostgresConnection {
-            url: postgres.url().clone(),
+    async fn connect(
+        server: &TestPostgres,
+        database: &str,
+        config: &PostgresConfig,
+    ) -> PostgresClient {
+        let target = PostgresTarget {
+            url: server.url().clone(),
             database: DatabaseName::new(database).unwrap(),
         };
-        Postgres::connect(&connection, config).await.unwrap()
+        PostgresClient::connect(&target, config).await.unwrap()
     }
 
     /// The server's URL with `host` in place of its own.
@@ -111,7 +115,7 @@ mod with_a_server {
         PostgresUrl::new(url.as_str()).unwrap()
     }
 
-    async fn show(postgres: &Postgres, query: &'static str) -> String {
+    async fn show(postgres: &PostgresClient, query: &'static str) -> String {
         sqlx::query_scalar(query)
             .fetch_one(postgres.pool())
             .await
@@ -164,12 +168,12 @@ mod with_a_server {
             .execute(admin.pool())
             .await
             .unwrap();
-        let connection = PostgresConnection {
+        let target = PostgresTarget {
             url: as_role(&server, "app", "app-password"),
             database: DatabaseName::new("app").unwrap(),
         };
 
-        let postgres = Postgres::connect(&connection, &PostgresConfig::default())
+        let postgres = PostgresClient::connect(&target, &PostgresConfig::default())
             .await
             .unwrap();
         check!(show(&postgres, "SELECT current_database()").await == "app");
@@ -178,12 +182,12 @@ mod with_a_server {
     #[tokio::test]
     async fn connect_creates_a_missing_database_on_an_ipv6_host() {
         let server = TestPostgres::start(&test_migrator().await).await;
-        let connection = PostgresConnection {
+        let target = PostgresTarget {
             url: on_host(&server, "[::1]"),
             database: DatabaseName::new("app").unwrap(),
         };
 
-        let postgres = Postgres::connect(&connection, &PostgresConfig::default())
+        let postgres = PostgresClient::connect(&target, &PostgresConfig::default())
             .await
             .unwrap();
         check!(show(&postgres, "SELECT current_database()").await == "app");
@@ -268,7 +272,7 @@ mod with_a_server {
 
     /// Whether `connect` gives up within 10s on `url`, with an acquire timeout of 500ms.
     async fn gives_up(url: PostgresUrl) -> bool {
-        let connection = PostgresConnection {
+        let target = PostgresTarget {
             url,
             database: DatabaseName::new("app").unwrap(),
         };
@@ -278,7 +282,7 @@ mod with_a_server {
         };
         let connected = tokio::time::timeout(
             Duration::from_secs(10),
-            Postgres::connect(&connection, &config),
+            PostgresClient::connect(&target, &config),
         )
         .await;
         matches!(connected, Ok(Err(_)))
@@ -311,7 +315,7 @@ mod with_a_server {
     #[tokio::test]
     async fn connect_creates_a_database_once_when_instances_start_together() {
         let server = TestPostgres::start(&test_migrator().await).await;
-        let connection = PostgresConnection {
+        let target = PostgresTarget {
             url: server.url().clone(),
             database: DatabaseName::new("app").unwrap(),
         };
@@ -319,8 +323,8 @@ mod with_a_server {
 
         let mut connects = tokio::task::JoinSet::new();
         for _ in 0..8 {
-            let (connection, config) = (connection.clone(), config.clone());
-            connects.spawn(async move { Postgres::connect(&connection, &config).await });
+            let (target, config) = (target.clone(), config.clone());
+            connects.spawn(async move { PostgresClient::connect(&target, &config).await });
         }
         while let Some(connected) = connects.join_next().await {
             check!(let Ok(Ok(_)) = connected);
@@ -343,17 +347,17 @@ mod with_a_server {
         }
         let url = as_role(&server, "app", "app-password");
 
-        let existing = PostgresConnection {
+        let existing = PostgresTarget {
             url: url.clone(),
             database: DatabaseName::new("app").unwrap(),
         };
-        check!(let Ok(_) = Postgres::connect(&existing, &PostgresConfig::default()).await);
+        check!(let Ok(_) = PostgresClient::connect(&existing, &PostgresConfig::default()).await);
 
-        let missing = PostgresConnection {
+        let missing = PostgresTarget {
             url,
             database: DatabaseName::new("missing").unwrap(),
         };
-        let error = Postgres::connect(&missing, &PostgresConfig::default())
+        let error = PostgresClient::connect(&missing, &PostgresConfig::default())
             .await
             .unwrap_err();
         check!(format!("{error:#}").contains("failed to create database missing"));
@@ -373,12 +377,12 @@ mod with_a_server {
                 .await
                 .unwrap();
         }
-        let connection = PostgresConnection {
+        let target = PostgresTarget {
             url: as_role(&server, "app", "app-password"),
             database: DatabaseName::new("closed").unwrap(),
         };
 
-        let error = Postgres::connect(&connection, &PostgresConfig::default())
+        let error = PostgresClient::connect(&target, &PostgresConfig::default())
             .await
             .unwrap_err();
         let chain = format!("{error:#}");
@@ -428,16 +432,16 @@ mod with_a_server {
     async fn migrate_works_when_instances_start_together() {
         let server = TestPostgres::start(&test_migrator().await).await;
         let migrator = std::sync::Arc::new(test_migrator().await);
-        let connection = PostgresConnection {
+        let target = PostgresTarget {
             url: server.url().clone(),
             database: DatabaseName::new("app").unwrap(),
         };
 
         let mut instances = tokio::task::JoinSet::new();
         for _ in 0..4 {
-            let (connection, migrator) = (connection.clone(), migrator.clone());
+            let (target, migrator) = (target.clone(), migrator.clone());
             instances.spawn(async move {
-                let postgres = Postgres::connect(&connection, &PostgresConfig::default()).await?;
+                let postgres = PostgresClient::connect(&target, &PostgresConfig::default()).await?;
                 postgres.migrate(&migrator).await
             });
         }
