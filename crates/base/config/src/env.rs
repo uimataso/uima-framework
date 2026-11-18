@@ -135,24 +135,6 @@ impl<'a> VarList<'a> {
     }
 }
 
-/// Why [`VarList::parse`] refused a list: an empty item, or an item `parse` refused.
-#[derive(Debug)]
-enum ListError<E> {
-    Empty,
-    Item(E),
-}
-
-impl<E: fmt::Display> fmt::Display for ListError<E> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Empty => f.write_str("an item is empty"),
-            Self::Item(error) => error.fmt(f),
-        }
-    }
-}
-
-impl<E: Error> Error for ListError<E> {}
-
 /// A variable with a default, from [`Var::or`].
 #[derive(Debug, Clone, Copy)]
 pub struct VarOr<'a> {
@@ -261,6 +243,32 @@ impl fmt::Display for EnvError {
 impl Error for EnvError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         self.source.as_deref().map(|source| source as _)
+    }
+}
+
+/// Why [`VarList::parse`] refused a list: an empty item, or an item `parse` refused, which it
+/// stands in for, message and source.
+#[derive(Debug)]
+enum ListError<E> {
+    Empty,
+    Item(E),
+}
+
+impl<E: fmt::Display> fmt::Display for ListError<E> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Empty => f.write_str("an item is empty"),
+            Self::Item(error) => error.fmt(f),
+        }
+    }
+}
+
+impl<E: Error> Error for ListError<E> {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        match self {
+            Self::Empty => None,
+            Self::Item(error) => error.source(),
+        }
     }
 }
 
@@ -406,6 +414,35 @@ mod tests {
         check!(!error.is_unset());
         let source = error.source().map(ToString::to_string);
         check!(source.as_deref() == Some("invalid digit found in string"));
+    }
+
+    #[test]
+    fn list_by_keeps_a_bad_item_s_error_chain() {
+        #[derive(Debug)]
+        struct Outer(std::num::ParseIntError);
+        impl fmt::Display for Outer {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                f.write_str("not a port")
+            }
+        }
+        impl Error for Outer {
+            fn source(&self) -> Option<&(dyn Error + 'static)> {
+                Some(&self.0)
+            }
+        }
+
+        let env = Env::from_pairs([("PORTS", "80,x")]);
+        let parse = |item: &str| u16::from_str(item).map_err(Outer);
+        let error = env
+            .var("PORTS")
+            .list_by(',')
+            .parse(parse)
+            .required()
+            .unwrap_err();
+        let item = error.source().unwrap();
+        check!(item.to_string() == "not a port");
+        let cause = item.source().map(ToString::to_string);
+        check!(cause.as_deref() == Some("invalid digit found in string"));
     }
 
     #[test]
