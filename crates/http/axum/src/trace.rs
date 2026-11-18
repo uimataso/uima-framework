@@ -37,17 +37,21 @@ const MAX_REQUEST_ID_LEN: usize = 128;
 /// Logs each request in a `request` span tagged with a request id, keeping credentials out of the
 /// log.
 ///
-/// The span is at `INFO` under the `uima_http_axum::trace` target, so every event logged while
-/// handling the request at `info` or above, such as the handler's `error!`, carries the request's
-/// `method`, `uri` and `request_id`. A filter that leaves that target off, such as `warn` or
-/// `my_app=info`, leaves the span and its fields off too. Its start and finish events are at
-/// `DEBUG` under `tower_http` targets, so a filter such as `tower_http=debug` turns them on. A 5xx
-/// response is logged once at `ERROR` under this layer's target, with the [`LoggedError`] it
-/// carries, and so is an error the inner service returns in place of a response. A filter keeps
-/// them when it keeps that target's errors, as `warn` does and `tower_http=debug` or `my_app=info`
-/// alone doesn't; under `warn` they carry none of the span's fields, which `uima_http_axum=info`
-/// keeps. A response whose body fails after its status went out isn't logged. The `uri` is the
-/// request's path and query, the path as the [crate docs](crate#paths) say this layer sees it.
+/// What it logs, and the filter that keeps each:
+///
+/// - The `request` span, at `INFO` under the `uima_http_axum::trace` target, with the request's
+///   `method`, `uri` and `request_id`. Every event logged while handling the request at `info` or
+///   above, such as the handler's `error!`, carries them. `uima_http_axum=info` keeps it; `warn`
+///   or `my_app=info` leaves it and its fields off.
+/// - The start and finish events, at `DEBUG` under `tower_http` targets; `tower_http=debug` keeps
+///   them.
+/// - A 5xx response, once at `ERROR` under `uima_http_axum::trace` with the [`LoggedError`] it
+///   carries, and an error the inner service returns in place of a response. `warn` keeps them,
+///   without the span's fields; `tower_http=debug` or `my_app=info` alone doesn't.
+/// - A response whose body fails after its status went out isn't logged.
+///
+/// The `uri` is the request's path and query, the path as the [crate docs](crate#paths) say this
+/// layer sees it.
 ///
 /// The request id is the request's `x-request-id` when that is 1 to 128 visible ASCII characters,
 /// and a new UUID otherwise, so a client can't put a long or unprintable value on every line the
