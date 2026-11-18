@@ -403,8 +403,9 @@ mod tests {
             .required()
             .unwrap_err();
         check!(error.name() == "PORTS");
-        check!(!error.to_string().contains("s3cret"));
         check!(!error.is_unset());
+        let source = error.source().map(ToString::to_string);
+        check!(source.as_deref() == Some("invalid digit found in string"));
     }
 
     #[test]
