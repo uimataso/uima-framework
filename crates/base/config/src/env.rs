@@ -45,8 +45,8 @@ impl Env {
         Self::new(move |name| vars.get(name).cloned())
     }
 
-    /// The variable `name`, to read with [`Var::optional`], [`Var::required`], [`Var::or`] or
-    /// [`Var::parse`].
+    /// The variable `name`, to read with [`Var::optional`], [`Var::required`], [`Var::or`],
+    /// [`Var::parse`] or [`Var::list_by`].
     pub fn var<'a>(&'a self, name: &'a str) -> Var<'a> {
         Var { env: self, name }
     }
@@ -100,6 +100,38 @@ impl<'a> Var<'a> {
                 source: Some(Box::new(source)),
             }),
         }
+    }
+
+    /// The value as a list with `sep` between its items, each trimmed. Finish with
+    /// [`VarList::parse`].
+    pub fn list_by(self, sep: char) -> VarList<'a> {
+        VarList { var: self, sep }
+    }
+}
+
+/// A variable read as a list, from [`Var::list_by`].
+#[derive(Debug, Clone, Copy)]
+pub struct VarList<'a> {
+    var: Var<'a>,
+    sep: char,
+}
+
+impl<'a> VarList<'a> {
+    /// Parses each item with `parse`. An item that doesn't parse fails the variable, and so does
+    /// an empty one, such as from a trailing `sep`. Finish as after [`Var::parse`].
+    pub fn parse<T, E>(self, mut parse: impl FnMut(&str) -> Result<T, E>) -> Parsed<'a, Vec<T>>
+    where
+        E: Error + Send + Sync + 'static,
+    {
+        self.var.parse(|value| {
+            value
+                .split(self.sep)
+                .map(|item| match item.trim() {
+                    "" => Err(ListError::Empty),
+                    item => parse(item).map_err(ListError::Item),
+                })
+                .collect()
+        })
     }
 }
 
@@ -214,6 +246,32 @@ impl Error for EnvError {
     }
 }
 
+/// Why [`VarList::parse`] refused a list: an empty item, or an item `parse` refused, which it
+/// stands in for, message and source.
+#[derive(Debug)]
+enum ListError<E> {
+    Empty,
+    Item(E),
+}
+
+impl<E: fmt::Display> fmt::Display for ListError<E> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Empty => f.write_str("an item is empty"),
+            Self::Item(error) => error.fmt(f),
+        }
+    }
+}
+
+impl<E: Error> Error for ListError<E> {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        match self {
+            Self::Empty => None,
+            Self::Item(error) => error.source(),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::net::SocketAddr;
@@ -310,6 +368,81 @@ mod tests {
     fn a_bad_default_panics_even_when_the_variable_is_set() {
         let env = Env::from_pairs([("PORT", "3000")]);
         let _ = env.var("PORT").or("nope").parse(u16::from_str);
+    }
+
+    #[test]
+    fn list_by_parses_each_item_trimmed() {
+        let env = Env::from_pairs([("PORTS", "80, 443 ,8080"), ("TOPICS", "a, b|c")]);
+        let ports = env.var("PORTS").list_by(',').parse(u16::from_str);
+        check!(ports.required().unwrap() == [80, 443, 8080]);
+        let topics = env.var("TOPICS").list_by('|').parse(String::from_str);
+        check!(topics.required().unwrap() == ["a, b", "c"]);
+    }
+
+    #[test]
+    fn list_by_falls_back_when_unset() {
+        let env = Env::from_pairs([("EMPTY", "")]);
+        for name in ["EMPTY", "NONE"] {
+            let ports = env.var(name).list_by(',').parse(u16::from_str);
+            check!(ports.or_else(|| vec![80]).unwrap() == [80]);
+        }
+    }
+
+    #[test]
+    fn list_by_fails_the_variable_on_an_empty_item() {
+        let env = Env::from_pairs([("TRAILING", "a,b,"), ("DOUBLE", "a,,b"), ("BLANK", " ")]);
+        for name in ["TRAILING", "DOUBLE", "BLANK"] {
+            let items = env.var(name).list_by(',').parse(String::from_str);
+            let error = items.required().unwrap_err();
+            check!(error.name() == name);
+            check!(!error.is_unset());
+            let source = error.source().map(ToString::to_string);
+            check!(source.as_deref() == Some("an item is empty"));
+        }
+    }
+
+    #[test]
+    fn list_by_fails_the_variable_on_a_bad_item() {
+        let env = Env::from_pairs([("PORTS", "80,s3cret")]);
+        let error = env
+            .var("PORTS")
+            .list_by(',')
+            .parse(u16::from_str)
+            .required()
+            .unwrap_err();
+        check!(error.name() == "PORTS");
+        check!(!error.is_unset());
+        let source = error.source().map(ToString::to_string);
+        check!(source.as_deref() == Some("invalid digit found in string"));
+    }
+
+    #[test]
+    fn list_by_keeps_a_bad_item_s_error_chain() {
+        #[derive(Debug)]
+        struct Outer(std::num::ParseIntError);
+        impl fmt::Display for Outer {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                f.write_str("not a port")
+            }
+        }
+        impl Error for Outer {
+            fn source(&self) -> Option<&(dyn Error + 'static)> {
+                Some(&self.0)
+            }
+        }
+
+        let env = Env::from_pairs([("PORTS", "80,x")]);
+        let parse = |item: &str| u16::from_str(item).map_err(Outer);
+        let error = env
+            .var("PORTS")
+            .list_by(',')
+            .parse(parse)
+            .required()
+            .unwrap_err();
+        let item = error.source().unwrap();
+        check!(item.to_string() == "not a port");
+        let cause = item.source().map(ToString::to_string);
+        check!(cause.as_deref() == Some("invalid digit found in string"));
     }
 
     #[test]

@@ -36,4 +36,4 @@
 
 mod env;
 
-pub use env::{Env, EnvError, Parsed, Var, VarOr};
+pub use env::{Env, EnvError, Parsed, Var, VarList, VarOr};
