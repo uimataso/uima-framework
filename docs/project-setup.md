@@ -194,6 +194,17 @@ rustc's and Clippy's default lints, plus a few more that the project's `Cargo.to
   ]
   ```
 
+- **Assertions**: every project keeps std's `assert_eq!` and `assert_ne!` out with `clippy.toml`,
+  so a test asserts with `uima_testing::check!`. std's `assert!` stays allowed: the code and the
+  framework's macros check an invariant with it, and the lint can't tell a test from the code.
+
+  ```toml
+  disallowed-macros = [
+    { path = "std::assert_eq", reason = "use uima_testing::check" },
+    { path = "std::assert_ne", reason = "use uima_testing::check" },
+  ]
+  ```
+
 ## Tests
 
 - **Runner**: the tests run with [nextest], and the doctests with `cargo test --doc`, which nextest
