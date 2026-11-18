@@ -1,5 +1,0 @@
-error: expected `status`, `code`, `transparent`, `no_data` or `debug_data`
- --> tests/ui/crate_on_variant.rs:6:11
-  |
-6 |     #[api(crate = ::uima_http_api_error)]
-  |           ^^^^^

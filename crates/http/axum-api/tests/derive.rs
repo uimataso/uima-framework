@@ -4,7 +4,7 @@ use axum::body::Body;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse as _, Response};
 use serde_json::{Value, json};
-use uima_http_api_error::{ApiError, FrameworkError};
+use uima_http_api::{ApiError, FrameworkError};
 use uima_http_axum_api::IntoResponse;
 use uima_testing::check;
 
@@ -49,13 +49,13 @@ async fn a_framework_error_answers_through_the_app_error() {
 }
 
 mod renamed {
-    use uima_http_api_error as api_error;
+    use uima_http_api as api;
     use uima_http_axum_api as axum_api;
 
     use super::*;
 
-    #[derive(Debug, thiserror::Error, api_error::ApiError, axum_api::IntoResponse)]
-    #[api(crate = api_error)]
+    #[derive(Debug, thiserror::Error, api::ApiError, axum_api::IntoResponse)]
+    #[api(crate = api)]
     #[into_response(crate = axum_api)]
     enum Renamed {
         #[error("gone")]
@@ -92,7 +92,7 @@ impl<T> ApiError for Gone<T> {
         None
     }
 
-    fn code_schemas() -> Vec<uima_http_api_error::CodeSchema> {
+    fn code_schemas() -> Vec<uima_http_api::CodeSchema> {
         Vec::new()
     }
 }

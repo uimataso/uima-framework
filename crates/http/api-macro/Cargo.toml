@@ -1,0 +1,19 @@
+[package]
+name = "uima-http-api-macro"
+version.workspace = true
+rust-version.workspace = true
+edition.workspace = true
+authors.workspace = true
+
+[lib]
+proc-macro = true
+
+[dependencies]
+# crate-local dependencies
+heck = "0.5"
+proc-macro2 = "1"
+quote = "1"
+syn = { version = "3", features = ["full"] }
+
+[lints]
+workspace = true

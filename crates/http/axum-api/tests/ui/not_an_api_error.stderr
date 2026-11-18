@@ -9,8 +9,8 @@ help: the trait `uima_http_axum_api::__private::ApiError` is not implemented for
   |
 4 | struct Plain;
   | ^^^^^^^^^^^^
-help: the trait `uima_http_axum_api::__private::ApiError` is implemented for `uima_http_api_error::framework_error::FrameworkError`
- --> $WORKSPACE/crates/http/api-error/src/framework_error.rs
+help: the trait `uima_http_axum_api::__private::ApiError` is implemented for `uima_http_api::framework_error::FrameworkError`
+ --> $WORKSPACE/crates/http/api/src/framework_error.rs
   |
   | #[derive(Debug, ApiError)]
   |                 ^^^^^^^^

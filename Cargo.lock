@@ -2969,7 +2969,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "uima-http-api-error"
+name = "uima-http-api"
 version = "0.0.0"
 dependencies = [
  "anyhow",
@@ -2978,13 +2978,13 @@ dependencies = [
  "serde_json",
  "thiserror",
  "trybuild",
- "uima-http-api-error-macro",
+ "uima-http-api-macro",
  "uima-testing",
  "utoipa",
 ]
 
 [[package]]
-name = "uima-http-api-error-macro"
+name = "uima-http-api-macro"
 version = "0.0.0"
 dependencies = [
  "heck",
@@ -3025,7 +3025,7 @@ dependencies = [
  "tower",
  "tracing",
  "trybuild",
- "uima-http-api-error",
+ "uima-http-api",
  "uima-http-axum",
  "uima-http-axum-api-macro",
  "uima-log-tracing-subscriber",
