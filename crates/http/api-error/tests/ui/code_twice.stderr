@@ -1,0 +1,5 @@
+error: `code` is given twice
+ --> tests/ui/code_twice.rs:6:23
+  |
+6 |     #[api(code = "a", code = "b")]
+  |                       ^^^^

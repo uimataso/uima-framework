@@ -1,0 +1,5 @@
+error: `ApiError` only supports enums
+ --> tests/ui/struct.rs:4:8
+  |
+4 | struct AppError;
+  |        ^^^^^^^^

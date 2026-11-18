@@ -1,0 +1,5 @@
+error: a status has no suffix
+ --> tests/ui/status_suffix.rs:6:20
+  |
+6 |     #[api(status = 410u16)]
+  |                    ^^^^^^

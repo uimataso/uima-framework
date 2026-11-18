@@ -1,0 +1,5 @@
+error: `crate` is given twice
+ --> tests/ui/crate_twice.rs:4:28
+  |
+4 | #[api(crate = nonexistent, crate = ::uima_http_api_error)]
+  |                            ^^^^^

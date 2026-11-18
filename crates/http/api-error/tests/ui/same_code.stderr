@@ -1,0 +1,5 @@
+error: `HTTPError` already has the error code `http-error`
+ --> tests/ui/same_code.rs:8:5
+  |
+8 |     HttpError,
+  |     ^^^^^^^^^

@@ -1,0 +1,5 @@
+error: expected `status`, `code`, `transparent`, `no_data` or `debug_data`
+ --> tests/ui/unknown_attribute.rs:6:11
+  |
+6 |     #[api(name = "gone")]
+  |           ^^^^

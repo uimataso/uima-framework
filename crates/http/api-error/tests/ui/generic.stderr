@@ -1,0 +1,5 @@
+error: `ApiError` doesn't support generics
+ --> tests/ui/generic.rs:4:14
+  |
+4 | enum AppError<T: std::fmt::Debug> {
+  |              ^

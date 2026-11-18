@@ -1,0 +1,5 @@
+error: `Gone` already has the error code `gone`
+ --> tests/ui/code_clash.rs:9:5
+  |
+9 |     AlsoGone,
+  |     ^^^^^^^^

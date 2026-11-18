@@ -1,0 +1,5 @@
+error: the code `ünicode` from this name isn't in kebab case; give one with `code`
+ --> tests/ui/name_not_kebab.rs:6:5
+  |
+6 |     Ünicode,
+  |     ^^^^^^^

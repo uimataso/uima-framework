@@ -1,0 +1,5 @@
+error: a code is in kebab case: lowercase letters and digits, joined by `-`
+ --> tests/ui/code_leading_dash.rs:6:18
+  |
+6 |     #[api(code = "-a")]
+  |                  ^^^^

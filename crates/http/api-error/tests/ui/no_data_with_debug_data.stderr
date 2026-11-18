@@ -1,0 +1,5 @@
+error: `no_data` and `debug_data` don't go together
+ --> tests/ui/no_data_with_debug_data.rs:7:5
+  |
+7 |     Internal(String),
+  |     ^^^^^^^^

@@ -1,0 +1,5 @@
+error: `debug_data` needs one unnamed field
+ --> tests/ui/debug_data_on_named.rs:7:5
+  |
+7 |     Internal { error: String },
+  |     ^^^^^^^^

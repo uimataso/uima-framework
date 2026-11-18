@@ -1,0 +1,5 @@
+error: expected `crate` on the enum
+ --> tests/ui/status_on_enum.rs:4:7
+  |
+4 | #[api(status = 404)]
+  |       ^^^^^^

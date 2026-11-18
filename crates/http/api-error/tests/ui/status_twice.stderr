@@ -1,0 +1,5 @@
+error: `status` is given twice
+ --> tests/ui/status_twice.rs:7:11
+  |
+7 |     #[api(status = 410)]
+  |           ^^^^^^

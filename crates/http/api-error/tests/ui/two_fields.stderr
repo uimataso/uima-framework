@@ -1,0 +1,5 @@
+error: a variant's data is one unnamed field or named fields; add `no_data` to leave them out
+ --> tests/ui/two_fields.rs:6:8
+  |
+6 |     Bad(u32, u32),
+  |        ^^^^^^^^^^
