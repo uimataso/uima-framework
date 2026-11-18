@@ -382,9 +382,14 @@ impl Variant {
             Data::Fields(fields) => {
                 let idents: Vec<_> = fields.iter().map(|(ident, _)| ident).collect();
                 let names = idents.iter().map(|ident| ident.unraw().to_string());
-                let values = idents.iter().map(|ident| to_value(quote!(#ident)));
+                // Bound to locals, since a field binds as `{ n }` only when no constant `n` is
+                // in scope.
+                let locals: Vec<_> = (0..idents.len())
+                    .map(|i| local(&format!("field_{i}")))
+                    .collect();
+                let values = locals.iter().map(|local| to_value(quote!(#local)));
                 quote! {
-                    Self::#ident { #(#idents),* } => #some(#json::Value::Object(
+                    Self::#ident { #(#idents: #locals),* } => #some(#json::Value::Object(
                         ::core::iter::Iterator::collect(::core::iter::IntoIterator::into_iter([
                             #((::std::string::String::from(#names), #values)),*
                         ]))

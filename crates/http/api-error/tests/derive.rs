@@ -485,19 +485,25 @@ mod shadowing {
     const inner: u8 = 0;
     const value: u8 = 0;
     const e: u8 = 0;
+    const n: u32 = 0;
 
-    #[derive(Debug, thiserror::Error, ApiError)]
+    // `Display` by hand, since thiserror's derive binds `{ n }` too.
+    #[derive(Debug, ApiError)]
     enum Shadowed {
-        #[error("one")]
         One(u32),
-        #[error("named")]
-        Named { n: u32 },
-        #[error("debug")]
+        Named {
+            n: u32,
+        },
         #[api(status = 500, debug_data)]
         Debug(String),
-        #[error(transparent)]
         #[api(transparent)]
         Framework(Error),
+    }
+
+    impl std::fmt::Display for Shadowed {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.write_str("shadowed")
+        }
     }
 
     #[test]
@@ -508,7 +514,7 @@ mod shadowing {
         check!(debug == cfg!(debug_assertions).then(|| json!(r#""why""#)));
         check!(Shadowed::Framework(Error::NotFound).status() == StatusCode::NOT_FOUND);
         check!(Shadowed::code_schemas().len() > 3);
-        check!([codes, field, inner, value, e] == [0; 5]);
+        check!([codes, field, inner, value, e] == [0; 5] && n == 0);
     }
 }
 
