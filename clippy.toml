@@ -1,0 +1,4 @@
+disallowed-macros = [
+  { path = "std::assert_eq", reason = "use uima_testing::check" },
+  { path = "std::assert_ne", reason = "use uima_testing::check" },
+]
