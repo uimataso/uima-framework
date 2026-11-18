@@ -184,21 +184,24 @@ rustc's and Clippy's default lints, plus a few more that the project's `Cargo.to
   `testing` feature are linted too.
 - **Silencing a lint**: prefer `#[expect(lint, reason = "...")]` to `#[allow(...)]`. Once the
   lint no longer fires, `expect` warns, so the attribute doesn't outlive its reason.
-- **A JSON API**: a project on `uima-http-axum-api` keeps axum's own `Json`, `Query` and `Path` out
-  with `clippy.toml`, so a body, query or path they would refuse answers the error body:
+- **`clippy.toml`**: every project's has the `disallowed-macros` below, and a project on
+  `uima-http-axum-api` adds the `disallowed-types`:
 
   ```toml
+  # A test asserts with uima_testing::check!. std's assert! stays allowed: the code and the
+  # framework's macros check an invariant with it, and the lint can't tell a test from the code.
+  disallowed-macros = [
+    { path = "std::assert_eq", reason = "use uima_testing::check" },
+    { path = "std::assert_ne", reason = "use uima_testing::check" },
+  ]
+
+  # A body, query or path axum's own extractors would refuse answers the error body.
   disallowed-types = [
     { path = "axum::Json", reason = "use uima_http_axum_api::ApiJson" },
     { path = "axum::extract::Query", reason = "use uima_http_axum_api::ApiQuery" },
     { path = "axum::extract::Path", reason = "use uima_http_axum_api::ApiPath" },
   ]
   ```
-
-- **Assertions**: copy this repo's [`clippy.toml`](../clippy.toml), which keeps std's `assert_eq!`
-  and `assert_ne!` out, their `debug_` forms too, so a test asserts with `uima_testing::check!`.
-  std's `assert!` stays allowed: the code and the framework's macros check an invariant with it,
-  and the lint can't tell a test from the code.
 
 ## Tests
 
