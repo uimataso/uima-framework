@@ -23,7 +23,10 @@ todo = "warn"
 uima-cancel = { path = "./crates/base/cancel", version = "0.0.0" }
 uima-config = { path = "./crates/base/config", version = "0.0.0" }
 uima-core = { path = "./crates/base/core", version = "0.0.0" }
+uima-http-api-error = { path = "./crates/http/api-error", version = "0.0.0" }
 uima-http-api-error-macro = { path = "./crates/http/api-error-macro", version = "0.0.0" }
+uima-http-axum = { path = "./crates/http/axum", version = "0.0.0" }
+uima-http-axum-api-macro = { path = "./crates/http/axum-api-macro", version = "0.0.0" }
 uima-log-tracing-subscriber = { path = "./crates/log/tracing-subscriber", version = "0.0.0" }
 uima-port-macro = { path = "./crates/base/port-macro", version = "0.0.0" }
 uima-testing = { path = "./crates/base/testing", version = "0.0.0" }

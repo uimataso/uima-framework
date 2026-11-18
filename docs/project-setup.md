@@ -183,6 +183,16 @@ rustc's and Clippy's default lints, plus a few more that the project's `Cargo.to
   `testing` feature are linted too.
 - **Silencing a lint**: prefer `#[expect(lint, reason = "...")]` to `#[allow(...)]`. Once the
   lint no longer fires, `expect` warns, so the attribute doesn't outlive its reason.
+- **A JSON API**: a project on `uima-http-axum-api` keeps axum's own `Json`, `Query` and `Path` out
+  with `clippy.toml`, so a body, query or path they would refuse answers the error body:
+
+  ```toml
+  disallowed-types = [
+    { path = "axum::Json", reason = "use uima_http_axum_api::ApiJson" },
+    { path = "axum::extract::Query", reason = "use uima_http_axum_api::ApiQuery" },
+    { path = "axum::extract::Path", reason = "use uima_http_axum_api::ApiPath" },
+  ]
+  ```
 
 ## Tests
 

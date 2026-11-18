@@ -28,7 +28,7 @@ use proc_macro::TokenStream;
 ///   As with `no_data`, `message` is still the `Display`.
 /// - `transparent` on a variant with one unnamed field that implements `ApiError` and `ToSchema`
 ///   lets the field answer for it, and adds its codes to the schema. Wrap
-///   `uima_http_api_error::Error` this way to take the framework's codes.
+///   `uima_http_api_error::FrameworkError` this way to take the framework's codes.
 /// - `crate = path` on the enum names `uima_http_api_error`, for an app that renames it.
 ///
 /// The derive also implements utoipa's `ToSchema`, from `uima_http_api_error::schema`.

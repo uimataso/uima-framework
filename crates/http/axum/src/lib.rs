@@ -41,4 +41,4 @@ mod tests;
 
 pub use origin_auth::{OriginAuth, OriginSecret};
 pub use same_origin::SameOrigin;
-pub use trace::{Trace, TraceService};
+pub use trace::{LoggedError, Trace, TraceService};

@@ -4,7 +4,7 @@
 //! # Examples
 //!
 //! ```
-//! use uima_http_api_error::{ApiError, Error, ErrorResponse};
+//! use uima_http_api_error::{ApiError, FrameworkError, ErrorResponse};
 //!
 //! #[derive(Debug, thiserror::Error, ApiError)]
 //! enum AppError {
@@ -18,7 +18,7 @@
 //!
 //!     #[error(transparent)]
 //!     #[api(transparent)]
-//!     Framework(#[from] Error),
+//!     Framework(#[from] FrameworkError),
 //! }
 //!
 //! let error = AppError::PayloadTooLarge { max_size: 500, actual: 600 };
@@ -42,7 +42,7 @@
 //! - `message` is the error's `Display`, for a person to read.
 //! - `data` is what a client needs to act on the error, or `null`.
 
-mod error;
+mod framework_error;
 mod schema;
 
 #[doc(hidden)]
@@ -52,7 +52,7 @@ use http::StatusCode;
 use serde::Serialize;
 use serde_json::Value;
 
-pub use error::Error;
+pub use framework_error::FrameworkError;
 pub use schema::{CodeSchema, schema};
 pub use uima_http_api_error_macro::ApiError;
 

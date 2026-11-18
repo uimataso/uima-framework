@@ -1,0 +1,17 @@
+error[E0277]: the trait bound `Plain: uima_http_axum_api::__private::ApiError` is not satisfied
+ --> tests/ui/not_an_api_error.rs:3:17
+  |
+3 | #[derive(Debug, IntoResponse)]
+  |                 ^^^^^^^^^^^^ unsatisfied trait bound
+  |
+help: the trait `uima_http_axum_api::__private::ApiError` is not implemented for `Plain`
+ --> tests/ui/not_an_api_error.rs:4:1
+  |
+4 | struct Plain;
+  | ^^^^^^^^^^^^
+help: the trait `uima_http_axum_api::__private::ApiError` is implemented for `uima_http_api_error::framework_error::FrameworkError`
+ --> $WORKSPACE/crates/http/api-error/src/framework_error.rs
+  |
+  | #[derive(Debug, ApiError)]
+  |                 ^^^^^^^^
+  = note: this error originates in the derive macro `IntoResponse` which comes from the expansion of the derive macro `ApiError` (in Nightly builds, run with -Z macro-backtrace for more info)
