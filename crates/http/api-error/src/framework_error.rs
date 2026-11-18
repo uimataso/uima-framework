@@ -1,4 +1,4 @@
-//! [`Error`], the framework's error codes.
+//! [`FrameworkError`], the framework's error codes.
 
 use std::fmt;
 
@@ -9,7 +9,7 @@ use crate::ApiError;
 #[derive(Debug, ApiError)]
 #[api(crate = crate)]
 #[non_exhaustive]
-pub enum Error {
+pub enum FrameworkError {
     /// The body isn't of a type the route takes, such as JSON without its `content-type`.
     #[api(status = 415, no_data)]
     UnsupportedMediaType { message: String },
@@ -47,7 +47,7 @@ pub enum Error {
     InternalError(anyhow::Error),
 }
 
-impl fmt::Display for Error {
+impl fmt::Display for FrameworkError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::UnsupportedMediaType { message }
@@ -67,7 +67,7 @@ impl fmt::Display for Error {
     }
 }
 
-impl std::error::Error for Error {
+impl std::error::Error for FrameworkError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Self::InternalError(e) => Some(e.as_ref()),
@@ -76,7 +76,7 @@ impl std::error::Error for Error {
     }
 }
 
-impl From<anyhow::Error> for Error {
+impl From<anyhow::Error> for FrameworkError {
     fn from(e: anyhow::Error) -> Self {
         Self::InternalError(e)
     }
@@ -96,55 +96,55 @@ mod tests {
         let message = || "m".to_owned();
         for (error, code, status) in [
             (
-                Error::UnsupportedMediaType { message: message() },
+                FrameworkError::UnsupportedMediaType { message: message() },
                 "unsupported-media-type",
                 415,
             ),
             (
-                Error::InvalidJson { message: message() },
+                FrameworkError::InvalidJson { message: message() },
                 "invalid-json",
                 400,
             ),
             (
-                Error::InvalidBody { message: message() },
+                FrameworkError::InvalidBody { message: message() },
                 "invalid-body",
                 422,
             ),
             (
-                Error::BodyTooLarge { message: message() },
+                FrameworkError::BodyTooLarge { message: message() },
                 "body-too-large",
                 413,
             ),
             (
-                Error::InvalidQuery { message: message() },
+                FrameworkError::InvalidQuery { message: message() },
                 "invalid-query",
                 400,
             ),
             (
-                Error::InvalidPath { message: message() },
+                FrameworkError::InvalidPath { message: message() },
                 "invalid-path",
                 400,
             ),
-            (Error::NotFound, "not-found", 404),
-            (Error::MethodNotAllowed, "method-not-allowed", 405),
+            (FrameworkError::NotFound, "not-found", 404),
+            (FrameworkError::MethodNotAllowed, "method-not-allowed", 405),
             (
-                Error::TooManyItems {
+                FrameworkError::TooManyItems {
                     limit: 1,
                     actual: 2,
                 },
                 "too-many-items",
                 400,
             ),
-            (Error::Timeout, "timeout", 503),
+            (FrameworkError::Timeout, "timeout", 503),
             (
-                Error::InternalError(anyhow::anyhow!("x")),
+                FrameworkError::InternalError(anyhow::anyhow!("x")),
                 "internal-error",
                 500,
             ),
         ] {
             check!(error.error_code() == code);
-            let has_data = matches!(error, Error::TooManyItems { .. })
-                || matches!(error, Error::InternalError(_)) && cfg!(debug_assertions);
+            let has_data = matches!(error, FrameworkError::TooManyItems { .. })
+                || matches!(error, FrameworkError::InternalError(_)) && cfg!(debug_assertions);
             check!(error.data().is_some() == has_data, "{code}");
             check!(
                 error.status() == StatusCode::from_u16(status).unwrap(),
@@ -155,21 +155,21 @@ mod tests {
 
     #[test]
     fn a_fixed_message_says_what_went_wrong() {
-        check!(Error::NotFound.to_string() == "not found");
-        check!(Error::MethodNotAllowed.to_string() == "the path doesn't take this method");
-        check!(Error::Timeout.to_string() == "the request took too long");
+        check!(FrameworkError::NotFound.to_string() == "not found");
+        check!(FrameworkError::MethodNotAllowed.to_string() == "the path doesn't take this method");
+        check!(FrameworkError::Timeout.to_string() == "the request took too long");
     }
 
     #[test]
     fn an_internal_error_keeps_its_source() {
-        let error = Error::from(anyhow::anyhow!("db down"));
+        let error = FrameworkError::from(anyhow::anyhow!("db down"));
         let source = std::error::Error::source(&error).map(ToString::to_string);
         check!(source.as_deref() == Some("db down"));
     }
 
     #[test]
     fn a_rejection_answers_its_message_and_no_data() {
-        let error = Error::InvalidBody {
+        let error = FrameworkError::InvalidBody {
             message: "missing field `name`".into(),
         };
         check!(
@@ -184,7 +184,7 @@ mod tests {
 
     #[test]
     fn an_internal_error_answers_its_chain_only_in_a_debug_build() {
-        let error = Error::from(anyhow::anyhow!("db down").context("load user"));
+        let error = FrameworkError::from(anyhow::anyhow!("db down").context("load user"));
         let body = serde_json::to_value(ErrorResponse::new(&error)).unwrap();
         check!(body["message"] == "internal error");
         if cfg!(debug_assertions) {

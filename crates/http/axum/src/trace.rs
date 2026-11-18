@@ -1,18 +1,23 @@
 //! [`Trace`], logging each request.
 
 use std::fmt;
+use std::sync::Arc;
 use std::task::{Context, Poll};
+use std::time::Duration;
 
-use axum::http::{HeaderMap, HeaderName, Request, Uri, header};
+use axum::http::{HeaderMap, HeaderName, Request, Response, Uri, header};
 use tower::{Layer, Service};
-use tower_http::classify::{ServerErrorsAsFailures, SharedClassifier};
+use tower_http::classify::{ServerErrorsAsFailures, ServerErrorsFailureClass, SharedClassifier};
 use tower_http::request_id::{
     MakeRequestUuid, PropagateRequestId, PropagateRequestIdLayer, RequestId, SetRequestId,
     SetRequestIdLayer,
 };
 use tower_http::sensitive_headers::{SetSensitiveHeaders, SetSensitiveHeadersLayer};
-use tower_http::trace::{MakeSpan, TraceLayer};
-use tracing::{Span, info_span};
+use tower_http::trace::{
+    DefaultOnBodyChunk, DefaultOnEos, DefaultOnRequest, DefaultOnResponse, MakeSpan, OnFailure,
+    OnResponse, TraceLayer,
+};
+use tracing::{Span, error, info_span};
 
 use crate::OriginAuth;
 use crate::paths::Paths;
@@ -32,13 +37,21 @@ const MAX_REQUEST_ID_LEN: usize = 128;
 /// Logs each request in a `request` span tagged with a request id, keeping credentials out of the
 /// log.
 ///
-/// The span is at `INFO` under the `uima_http_axum::trace` target, so every event logged while
-/// handling the request at `info` or above, such as the handler's `error!`, carries the request's
-/// `method`, `uri` and `request_id`. A filter that leaves that target off, such as `warn` or
-/// `my_app=info`, leaves the span and its fields off too. Its start and finish events are at
-/// `DEBUG` under `tower_http` targets, so a filter such as `tower_http=debug` turns them on, and a
-/// 5xx response is logged at `ERROR`. The `uri` is the request's path and query, the path as the
-/// [crate docs](crate#paths) say this layer sees it.
+/// What it logs, and the filter that keeps each:
+///
+/// - The `request` span, at `INFO` under the `uima_http_axum::trace` target, with the request's
+///   `method`, `uri` and `request_id`. Every event logged while handling the request at `info` or
+///   above, such as the handler's `error!`, carries them. `uima_http_axum=info` keeps it; `warn`
+///   or `my_app=info` leaves it and its fields off.
+/// - The start and finish events, at `DEBUG` under `tower_http` targets; `tower_http=debug` keeps
+///   them.
+/// - A 5xx response, once at `ERROR` under `uima_http_axum::trace` with the [`LoggedError`] it
+///   carries, and an error the inner service returns in place of a response. `warn` keeps them,
+///   without the span's fields; `tower_http=debug` or `my_app=info` alone doesn't.
+/// - A response whose body fails after its status went out isn't logged.
+///
+/// The `uri` is the request's path and query, the path as the [crate docs](crate#paths) say this
+/// layer sees it.
 ///
 /// The request id is the request's `x-request-id` when that is 1 to 128 visible ASCII characters,
 /// and a new UUID otherwise, so a client can't put a long or unprintable value on every line the
@@ -77,6 +90,8 @@ impl<S> Layer<S> for Trace {
             .make_span_with(RequestSpan {
                 hidden_query_paths: self.hidden_query_paths.clone(),
             })
+            .on_response(ResponseLog)
+            .on_failure(ResponseLog)
             .layer(inner);
         let inner = SetRequestIdLayer::new(REQUEST_ID, MakeRequestUuid).layer(inner);
         let inner = SetSensitiveHeadersLayer::new(SENSITIVE).layer(inner);
@@ -123,6 +138,11 @@ type Stack<S> = SetSensitiveHeaders<
             PropagateRequestId<S>,
             SharedClassifier<ServerErrorsAsFailures>,
             RequestSpan,
+            DefaultOnRequest,
+            ResponseLog,
+            DefaultOnBodyChunk,
+            DefaultOnEos,
+            ResponseLog,
         >,
         MakeRequestUuid,
     >,
@@ -152,6 +172,65 @@ impl<B> MakeSpan<B> for RequestSpan {
             version = ?request.version(),
             request_id,
         )
+    }
+}
+
+/// An error a response carries in its extensions, for [`Trace`] to log with a 5xx response, such as
+/// the chain of the error the response answers.
+///
+/// ```
+/// use axum::http::StatusCode;
+/// use axum::response::IntoResponse as _;
+/// use uima_http_axum::LoggedError;
+///
+/// let error = anyhow::anyhow!("db down").context("load user");
+/// let mut response = StatusCode::INTERNAL_SERVER_ERROR.into_response();
+/// response.extensions_mut().insert(LoggedError::new(&error));
+/// ```
+#[derive(Debug, Clone)]
+pub struct LoggedError(Arc<str>);
+
+impl LoggedError {
+    /// The error as its `{:?}`, which for an `anyhow::Error` is its chain.
+    pub fn new(error: &(impl fmt::Debug + ?Sized)) -> Self {
+        Self(format!("{error:?}").into())
+    }
+}
+
+/// Logs a 5xx response once, with its [`LoggedError`], and an error the inner service returns in
+/// place of a response; `tower_http`'s debug event for every response stays.
+#[derive(Debug, Clone, Copy)]
+pub struct ResponseLog;
+
+impl<B> OnResponse<B> for ResponseLog {
+    fn on_response(self, response: &Response<B>, latency: Duration, span: &Span) {
+        DefaultOnResponse::new().on_response(response, latency, span);
+        let status = response.status();
+        if status.is_server_error() {
+            let logged = response.extensions().get::<LoggedError>();
+            let error = logged.map(|logged| &*logged.0);
+            let latency = Millis(latency);
+            error!(status = status.as_u16(), %latency, error, "response failed");
+        }
+    }
+}
+
+impl OnFailure<ServerErrorsFailureClass> for ResponseLog {
+    fn on_failure(&mut self, class: ServerErrorsFailureClass, latency: Duration, _: &Span) {
+        // A 5xx status is logged with its response.
+        if let ServerErrorsFailureClass::Error(class) = class {
+            let latency = Millis(latency);
+            error!(error = class, %latency, "response failed");
+        }
+    }
+}
+
+/// A latency as `tower_http`'s events log it, in whole milliseconds.
+struct Millis(Duration);
+
+impl fmt::Display for Millis {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{} ms", self.0.as_millis())
     }
 }
 
@@ -366,12 +445,113 @@ mod tests {
             .find(|event| event.message == "the handler failed");
         assert!(let Some(app_error) = app_error);
         check!(in_span(app_error));
-        let failure = events
+        let failures: Vec<_> = events
             .iter()
-            .find(|event| event.target == "tower_http::trace::on_failure");
-        assert!(let Some(failure) = failure);
+            .filter(|event| event.message == "response failed")
+            .collect();
+        assert!(let [failure] = &failures[..]);
         check!(failure.level == Level::ERROR);
+        check!(failure.target == "uima_http_axum::trace");
+        check!(failure.fields["status"] == "500");
+        check!(!failure.fields.contains_key("error"));
         check!(in_span(failure));
+    }
+
+    #[tokio::test]
+    async fn a_5xx_logs_the_error_it_carries_once() {
+        let logs = LogCapture::start();
+
+        send(Trace::new(), Request::get("/fail-with-error")).await;
+
+        let failures: Vec<_> = logs
+            .events()
+            .into_iter()
+            .filter(|event| event.level == Level::ERROR)
+            .collect();
+        assert!(let [failure] = &failures[..]);
+        check!(failure.fields["error"] == "load user\n\nCaused by:\n    db down");
+        let latency = failure.fields["latency"].strip_suffix(" ms").unwrap();
+        check!(latency.parse::<u64>().unwrap() >= 20);
+    }
+
+    #[tokio::test]
+    async fn an_error_in_place_of_a_response_is_logged() {
+        let service = tower::service_fn(|_: Request| async {
+            Err::<Response, _>(std::io::Error::other("gone"))
+        });
+        let logs = LogCapture::start();
+
+        let request = Request::get("/").body(Body::empty()).unwrap();
+        let result = Trace::new().layer(service).oneshot(request).await;
+
+        check!(result.is_err());
+        let failures: Vec<_> = logs
+            .events()
+            .into_iter()
+            .filter(|event| event.level == Level::ERROR)
+            .collect();
+        assert!(let [failure] = &failures[..]);
+        check!(failure.fields["error"].contains("gone"));
+        check!(failure.target == "uima_http_axum::trace");
+        check!(failure.fields["latency"].ends_with(" ms"));
+    }
+
+    #[test]
+    fn a_latency_is_in_whole_milliseconds() {
+        check!(Millis(Duration::from_micros(1_500_900)).to_string() == "1500 ms");
+    }
+
+    #[tokio::test]
+    async fn a_newline_in_the_error_stays_on_its_line() {
+        let buffer = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let writer = buffer.clone();
+        let subscriber = tracing_subscriber::fmt()
+            .with_ansi(false)
+            .with_writer(move || Writer(writer.clone()))
+            .finish();
+        let _guard = tracing::subscriber::set_default(subscriber);
+
+        send(Trace::new(), Request::get("/fail-with-error")).await;
+
+        let output = String::from_utf8(buffer.lock().unwrap().clone()).unwrap();
+        let lines: Vec<_> = output
+            .lines()
+            .filter(|line| line.contains("ERROR"))
+            .collect();
+        assert!(let [line] = &lines[..]);
+        check!(
+            line.contains(r"load user\n\nCaused by:\n    db down"),
+            "{line}"
+        );
+    }
+
+    /// A `fmt` writer into a shared buffer.
+    struct Writer(std::sync::Arc<std::sync::Mutex<Vec<u8>>>);
+
+    impl std::io::Write for Writer {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(bytes);
+            Ok(bytes.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[tokio::test]
+    async fn a_4xx_logs_no_error_even_with_one() {
+        let logs = LogCapture::start();
+
+        let response = send(Trace::new(), Request::get("/refuse-with-error")).await;
+
+        check!(response.status() == StatusCode::BAD_REQUEST);
+        check!(
+            !logs
+                .events()
+                .iter()
+                .any(|event| event.level == Level::ERROR)
+        );
     }
 
     #[tokio::test]
@@ -427,6 +607,8 @@ mod tests {
             .route("/span", get(current_span))
             .route("/credentials", get(credentials))
             .route("/fail", get(fail))
+            .route("/fail-with-error", get(fail_with_error))
+            .route("/refuse-with-error", get(refuse_with_error))
             .layer(trace);
         router
             .oneshot(request.body(Body::empty()).unwrap())
@@ -463,6 +645,34 @@ mod tests {
     async fn fail() -> StatusCode {
         error!("the handler failed");
         StatusCode::INTERNAL_SERVER_ERROR
+    }
+
+    async fn fail_with_error() -> Response {
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        with_error(StatusCode::INTERNAL_SERVER_ERROR)
+    }
+
+    async fn refuse_with_error() -> Response {
+        with_error(StatusCode::BAD_REQUEST)
+    }
+
+    fn with_error(status: StatusCode) -> Response {
+        let error = std::io::Error::other("db down");
+        let error = format!("load user\n\nCaused by:\n    {error}");
+        let mut response = status.into_response();
+        response
+            .extensions_mut()
+            .insert(LoggedError::new(&Text(error)));
+        response
+    }
+
+    /// Debugs as its text, as an `anyhow::Error` debugs as its chain.
+    struct Text(String);
+
+    impl fmt::Debug for Text {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            f.write_str(&self.0)
+        }
     }
 
     /// The fields of the span the first event was logged in.

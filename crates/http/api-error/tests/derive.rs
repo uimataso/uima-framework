@@ -3,7 +3,7 @@
 use http::StatusCode;
 use serde::Serialize;
 use serde_json::{Value, json};
-use uima_http_api_error::{ApiError, Error, ErrorResponse};
+use uima_http_api_error::{ApiError, ErrorResponse, FrameworkError};
 use uima_testing::check;
 use utoipa::{PartialSchema as _, ToSchema};
 
@@ -35,7 +35,7 @@ enum AppError {
 
     #[error(transparent)]
     #[api(transparent)]
-    Framework(#[from] Error),
+    Framework(#[from] FrameworkError),
 }
 
 fn response(error: &impl ApiError) -> Value {
@@ -106,8 +106,8 @@ fn no_data_keeps_the_fields_out_of_the_response() {
 
 #[test]
 fn transparent_gives_the_inner_errors_answer() {
-    check!(AppError::from(Error::NotFound).status() == StatusCode::NOT_FOUND);
-    let error = AppError::from(Error::TooManyItems {
+    check!(AppError::from(FrameworkError::NotFound).status() == StatusCode::NOT_FOUND);
+    let error = AppError::from(FrameworkError::TooManyItems {
         limit: 100,
         actual: 101,
     });
@@ -186,7 +186,7 @@ mod clash {
 
         #[error(transparent)]
         #[api(transparent)]
-        Framework(Error),
+        Framework(FrameworkError),
     }
 
     #[derive(Debug, thiserror::Error, ApiError)]
@@ -198,7 +198,7 @@ mod clash {
 
         #[error(transparent)]
         #[api(transparent)]
-        Framework(Error),
+        Framework(FrameworkError),
     }
 
     #[test]
@@ -466,11 +466,11 @@ mod from_a_macro {
         };
     }
 
-    wrap!(Error);
+    wrap!(FrameworkError);
 
     #[test]
     fn a_transparent_type_from_a_macro_works() {
-        check!(Wrapped::Inner(Error::NotFound).status() == StatusCode::NOT_FOUND);
+        check!(Wrapped::Inner(FrameworkError::NotFound).status() == StatusCode::NOT_FOUND);
         check!(!Wrapped::code_schemas().is_empty());
     }
 }
@@ -497,7 +497,7 @@ mod shadowing {
         #[api(status = 500, debug_data)]
         Debug(String),
         #[api(transparent)]
-        Framework(Error),
+        Framework(FrameworkError),
     }
 
     impl std::fmt::Display for Shadowed {
@@ -512,7 +512,7 @@ mod shadowing {
         check!(Shadowed::Named { n: 1 }.data() == Some(json!({"n": 1})));
         let debug = Shadowed::Debug("why".into()).data();
         check!(debug == cfg!(debug_assertions).then(|| json!(r#""why""#)));
-        check!(Shadowed::Framework(Error::NotFound).status() == StatusCode::NOT_FOUND);
+        check!(Shadowed::Framework(FrameworkError::NotFound).status() == StatusCode::NOT_FOUND);
         check!(Shadowed::code_schemas().len() > 3);
         check!([codes, field, inner, value, e] == [0; 5] && n == 0);
     }
@@ -528,7 +528,7 @@ mod order {
         TooManyItems { actual: usize, limit: usize },
         #[error(transparent)]
         #[api(transparent)]
-        Framework(Error),
+        Framework(FrameworkError),
     }
 
     #[test]

@@ -10,10 +10,10 @@ help: the following other types implement trait `ApiError`
 3 | #[derive(Debug, thiserror::Error, ApiError)]
   |                                   ^^^^^^^^ `AppError`
   |
- ::: src/error.rs
+ ::: src/framework_error.rs
   |
   | #[derive(Debug, ApiError)]
-  |                 ^^^^^^^^ `uima_http_api_error::Error`
+  |                 ^^^^^^^^ `FrameworkError`
   = note: this error originates in the derive macro `ApiError` (in Nightly builds, run with -Z macro-backtrace for more info)
 
 error[E0277]: the trait bound `std::io::Error: uima_http_api_error::__private::utoipa::ToSchema` is not satisfied

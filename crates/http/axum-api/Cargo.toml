@@ -1,0 +1,36 @@
+[package]
+name = "uima-http-axum-api"
+version.workspace = true
+rust-version.workspace = true
+edition.workspace = true
+authors.workspace = true
+
+[dependencies]
+# local crates
+uima-http-api-error = { workspace = true }
+uima-http-axum = { workspace = true }
+uima-http-axum-api-macro = { workspace = true }
+
+# workspace dependencies
+anyhow = { workspace = true }
+axum = { workspace = true, features = ["json", "query"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[dev-dependencies]
+# local crates
+uima-log-tracing-subscriber = { workspace = true, features = ["testing"] }
+uima-testing = { workspace = true }
+
+# workspace dependencies
+tokio = { workspace = true, features = ["macros", "rt"] }
+tower = { workspace = true, features = ["util"] }
+tracing = { workspace = true }
+
+# crate-local dependencies
+futures-util = { version = "0.3", default-features = false }
+thiserror = "2"
+trybuild = "1"
+
+[lints]
+workspace = true

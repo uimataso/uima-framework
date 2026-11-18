@@ -1,0 +1,5 @@
+error: `crate` is given twice
+ --> tests/ui/crate_twice.rs:4:45
+  |
+4 | #[into_response(crate = uima_http_axum_api, crate = uima_http_axum_api)]
+  |                                             ^^^^^
