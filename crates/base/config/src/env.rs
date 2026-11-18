@@ -45,8 +45,8 @@ impl Env {
         Self::new(move |name| vars.get(name).cloned())
     }
 
-    /// The variable `name`, to read with [`Var::optional`], [`Var::required`], [`Var::or`] or
-    /// [`Var::parse`].
+    /// The variable `name`, to read with [`Var::optional`], [`Var::required`], [`Var::or`],
+    /// [`Var::parse`] or [`Var::list_by`].
     pub fn var<'a>(&'a self, name: &'a str) -> Var<'a> {
         Var { env: self, name }
     }
@@ -100,6 +100,35 @@ impl<'a> Var<'a> {
                 source: Some(Box::new(source)),
             }),
         }
+    }
+
+    /// The value as a list with `sep` between its items, each trimmed. Finish with
+    /// [`VarList::parse`].
+    pub fn list_by(self, sep: char) -> VarList<'a> {
+        VarList { var: self, sep }
+    }
+}
+
+/// A variable read as a list, from [`Var::list_by`].
+#[derive(Debug, Clone, Copy)]
+pub struct VarList<'a> {
+    var: Var<'a>,
+    sep: char,
+}
+
+impl<'a> VarList<'a> {
+    /// Parses each item with `parse`; an item that doesn't parse fails the variable. Finish as
+    /// after [`Var::parse`].
+    pub fn parse<T, E>(self, parse: impl Fn(&str) -> Result<T, E>) -> Parsed<'a, Vec<T>>
+    where
+        E: Error + Send + Sync + 'static,
+    {
+        self.var.parse(|value| {
+            value
+                .split(self.sep)
+                .map(|item| parse(item.trim()))
+                .collect()
+        })
     }
 }
 
@@ -310,6 +339,38 @@ mod tests {
     fn a_bad_default_panics_even_when_the_variable_is_set() {
         let env = Env::from_pairs([("PORT", "3000")]);
         let _ = env.var("PORT").or("nope").parse(u16::from_str);
+    }
+
+    #[test]
+    fn list_by_parses_each_item_trimmed() {
+        let env = Env::from_pairs([("PORTS", "80, 443 ,8080"), ("TOPICS", "a, b|c")]);
+        let ports = env.var("PORTS").list_by(',').parse(u16::from_str);
+        check!(ports.required().unwrap() == [80, 443, 8080]);
+        let topics = env.var("TOPICS").list_by('|').parse(String::from_str);
+        check!(topics.required().unwrap() == ["a, b", "c"]);
+    }
+
+    #[test]
+    fn list_by_falls_back_when_unset() {
+        let env = Env::from_pairs([("EMPTY", "")]);
+        for name in ["EMPTY", "NONE"] {
+            let ports = env.var(name).list_by(',').parse(u16::from_str);
+            check!(ports.or_else(|| vec![80]).unwrap() == [80]);
+        }
+    }
+
+    #[test]
+    fn list_by_fails_the_variable_on_a_bad_item() {
+        let env = Env::from_pairs([("PORTS", "80,s3cret")]);
+        let error = env
+            .var("PORTS")
+            .list_by(',')
+            .parse(u16::from_str)
+            .required()
+            .unwrap_err();
+        check!(error.name() == "PORTS");
+        check!(!error.to_string().contains("s3cret"));
+        check!(!error.is_unset());
     }
 
     #[test]
