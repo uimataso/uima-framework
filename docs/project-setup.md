@@ -171,7 +171,8 @@ in `.git-blame-ignore-revs`. GitHub and Forgejo read the file on their own; loca
 
 ## Lints
 
-rustc's and Clippy's default lints, plus a few more that the project's `Cargo.toml` turns on.
+rustc's and Clippy's default lints, plus a few more that the project's `Cargo.toml` and
+`clippy.toml` turn on.
 
 - **The lint table**: copy this repo's `[workspace.lints]` from [`Cargo.toml`](../Cargo.toml).
   Cargo can't share lints across repos, so each project keeps its own copy. Keep the lints at
@@ -194,16 +195,10 @@ rustc's and Clippy's default lints, plus a few more that the project's `Cargo.to
   ]
   ```
 
-- **Assertions**: every project keeps std's `assert_eq!` and `assert_ne!` out with `clippy.toml`,
-  so a test asserts with `uima_testing::check!`. std's `assert!` stays allowed: the code and the
-  framework's macros check an invariant with it, and the lint can't tell a test from the code.
-
-  ```toml
-  disallowed-macros = [
-    { path = "std::assert_eq", reason = "use uima_testing::check" },
-    { path = "std::assert_ne", reason = "use uima_testing::check" },
-  ]
-  ```
+- **Assertions**: copy this repo's [`clippy.toml`](../clippy.toml), which keeps std's `assert_eq!`
+  and `assert_ne!` out, their `debug_` forms too, so a test asserts with `uima_testing::check!`.
+  std's `assert!` stays allowed: the code and the framework's macros check an invariant with it,
+  and the lint can't tell a test from the code.
 
 ## Tests
 
