@@ -58,6 +58,8 @@ fn crate_path(attrs: &[syn::Attribute]) -> syn::Result<syn::Path> {
 
 #[cfg(test)]
 mod tests {
+    use uima_testing::check;
+
     use super::*;
 
     #[test]
@@ -69,15 +71,15 @@ mod tests {
 
         let output = expand(input).unwrap().to_string();
 
-        assert!(output.contains("renamed :: error_response"), "{output}");
-        assert!(
+        check!(output.contains("renamed :: error_response"), "{output}");
+        check!(
             output.contains("renamed :: __private :: ApiError"),
             "{output}"
         );
-        assert!(
+        check!(
             output.contains("renamed :: __private :: axum :: response"),
             "{output}"
         );
-        assert!(!output.contains("uima_http_axum_api"), "{output}");
+        check!(!output.contains("uima_http_axum_api"), "{output}");
     }
 }
