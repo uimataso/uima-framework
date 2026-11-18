@@ -1,5 +1,4 @@
-//! The error body of a JSON API, and its OpenAPI schema. Derive [`ApiError`](macro@ApiError) on an
-//! app's error enum; its doc lists the attributes.
+//! A JSON API's parts that no server library owns.
 //!
 //! # Examples
 //!
@@ -42,6 +41,7 @@
 //! - `message` is the error's `Display`, for a person to read.
 //! - `data` is what a client needs to act on the error, or `null`.
 
+mod batch;
 mod framework_error;
 mod schema;
 
@@ -52,6 +52,7 @@ use http::StatusCode;
 use serde::Serialize;
 use serde_json::Value;
 
+pub use batch::distinct_uids;
 pub use framework_error::FrameworkError;
 pub use schema::{CodeSchema, schema};
 pub use uima_http_api_macro::ApiError;

@@ -2978,6 +2978,7 @@ dependencies = [
  "serde_json",
  "thiserror",
  "trybuild",
+ "uima-core",
  "uima-http-api-macro",
  "uima-testing",
  "utoipa",
