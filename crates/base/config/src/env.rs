@@ -117,20 +117,41 @@ pub struct VarList<'a> {
 }
 
 impl<'a> VarList<'a> {
-    /// Parses each item with `parse`; an item that doesn't parse fails the variable. Finish as
-    /// after [`Var::parse`].
-    pub fn parse<T, E>(self, parse: impl Fn(&str) -> Result<T, E>) -> Parsed<'a, Vec<T>>
+    /// Parses each item with `parse`. An item that doesn't parse fails the variable, and so does
+    /// an empty one, such as from a trailing `sep`. Finish as after [`Var::parse`].
+    pub fn parse<T, E>(self, mut parse: impl FnMut(&str) -> Result<T, E>) -> Parsed<'a, Vec<T>>
     where
         E: Error + Send + Sync + 'static,
     {
         self.var.parse(|value| {
             value
                 .split(self.sep)
-                .map(|item| parse(item.trim()))
+                .map(|item| match item.trim() {
+                    "" => Err(ListError::Empty),
+                    item => parse(item).map_err(ListError::Item),
+                })
                 .collect()
         })
     }
 }
+
+/// Why [`VarList::parse`] refused a list: an empty item, or an item `parse` refused.
+#[derive(Debug)]
+enum ListError<E> {
+    Empty,
+    Item(E),
+}
+
+impl<E: fmt::Display> fmt::Display for ListError<E> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Empty => f.write_str("an item is empty"),
+            Self::Item(error) => error.fmt(f),
+        }
+    }
+}
+
+impl<E: Error> Error for ListError<E> {}
 
 /// A variable with a default, from [`Var::or`].
 #[derive(Debug, Clone, Copy)]
@@ -356,6 +377,19 @@ mod tests {
         for name in ["EMPTY", "NONE"] {
             let ports = env.var(name).list_by(',').parse(u16::from_str);
             check!(ports.or_else(|| vec![80]).unwrap() == [80]);
+        }
+    }
+
+    #[test]
+    fn list_by_fails_the_variable_on_an_empty_item() {
+        let env = Env::from_pairs([("TRAILING", "a,b,"), ("DOUBLE", "a,,b"), ("BLANK", " ")]);
+        for name in ["TRAILING", "DOUBLE", "BLANK"] {
+            let items = env.var(name).list_by(',').parse(String::from_str);
+            let error = items.required().unwrap_err();
+            check!(error.name() == name);
+            check!(!error.is_unset());
+            let source = error.source().map(ToString::to_string);
+            check!(source.as_deref() == Some("an item is empty"));
         }
     }
 
