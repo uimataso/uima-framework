@@ -78,7 +78,6 @@ impl PageRule {
 
 /// Why a [`PageRule`] refused a request's page.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[non_exhaustive]
 pub enum InvalidPage {
     /// A limit of 0.
     ZeroLimit,

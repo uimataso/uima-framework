@@ -2,6 +2,8 @@
 
 use std::fmt;
 
+use uima_core::InvalidPage;
+
 use crate::ApiError;
 
 /// The errors the framework answers with, for an app's error enum to wrap in a `transparent`
@@ -35,7 +37,11 @@ pub enum FrameworkError {
     /// The path doesn't take the method.
     #[api(status = 405)]
     MethodNotAllowed,
-    /// A request names more items than the route takes, each counted once.
+    /// A page's limit is 0.
+    #[api(status = 400)]
+    InvalidLimit,
+    /// A request names or asks for more items than the route takes, such as a page limit above
+    /// the max.
     #[api(status = 400)]
     TooManyItems { limit: usize, actual: usize },
     /// The service couldn't answer in time, such as waiting for a database connection.
@@ -58,6 +64,7 @@ impl fmt::Display for FrameworkError {
             | Self::InvalidPath { message } => f.write_str(message),
             Self::NotFound => f.write_str("not found"),
             Self::MethodNotAllowed => f.write_str("the path doesn't take this method"),
+            Self::InvalidLimit => f.write_str("the limit must be at least 1"),
             Self::TooManyItems { limit, actual } => {
                 write!(f, "{actual} items, over the limit of {limit}")
             }
@@ -82,14 +89,67 @@ impl From<anyhow::Error> for FrameworkError {
     }
 }
 
+/// `invalid-limit` for a limit of 0, and `too-many-items` for one above the rule's max.
+///
+/// `?` converts only once, so an app error that wraps [`FrameworkError`] converts the refusal
+/// through it:
+///
+/// ```
+/// use uima_core::{InvalidPage, OffsetQuery, PageRule};
+/// use uima_http_api::{ApiError, FrameworkError};
+///
+/// #[derive(Debug, thiserror::Error, ApiError)]
+/// enum AppError {
+///     #[error(transparent)]
+///     #[api(transparent)]
+///     Framework(#[from] FrameworkError),
+/// }
+///
+/// impl From<InvalidPage> for AppError {
+///     fn from(e: InvalidPage) -> Self {
+///         FrameworkError::from(e).into()
+///     }
+/// }
+///
+/// const RULE: PageRule = PageRule::new(20, 100);
+///
+/// fn page(limit: Option<u32>, offset: Option<u32>) -> Result<OffsetQuery, AppError> {
+///     Ok(RULE.offset_query(limit, offset)?)
+/// }
+///
+/// assert_eq!(page(Some(0), None).unwrap_err().error_code(), "invalid-limit");
+/// ```
+impl From<InvalidPage> for FrameworkError {
+    fn from(e: InvalidPage) -> Self {
+        match e {
+            InvalidPage::ZeroLimit => Self::InvalidLimit,
+            InvalidPage::AboveMax { received, max } => Self::TooManyItems {
+                limit: usize::try_from(max).expect("a u32 fits in a usize"),
+                actual: usize::try_from(received).expect("a u32 fits in a usize"),
+            },
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use http::StatusCode;
     use serde_json::json;
+    use uima_core::PageRule;
     use uima_testing::check;
 
     use super::*;
     use crate::ErrorResponse;
+
+    #[test]
+    fn a_zero_limit_is_an_invalid_limit_and_one_above_the_max_too_many_items() {
+        const RULE: PageRule = PageRule::new(20, 100);
+        let zero = RULE.offset_query(Some(0), None).unwrap_err();
+        let above = RULE.offset_query(Some(250), None).unwrap_err();
+
+        check!(let FrameworkError::InvalidLimit = zero.into());
+        check!(let FrameworkError::TooManyItems { limit: 100, actual: 250 } = above.into());
+    }
 
     #[test]
     fn each_code_has_one_status() {
@@ -127,6 +187,7 @@ mod tests {
             ),
             (FrameworkError::NotFound, "not-found", 404),
             (FrameworkError::MethodNotAllowed, "method-not-allowed", 405),
+            (FrameworkError::InvalidLimit, "invalid-limit", 400),
             (
                 FrameworkError::TooManyItems {
                     limit: 1,
@@ -157,6 +218,7 @@ mod tests {
     fn a_fixed_message_says_what_went_wrong() {
         check!(FrameworkError::NotFound.to_string() == "not found");
         check!(FrameworkError::MethodNotAllowed.to_string() == "the path doesn't take this method");
+        check!(FrameworkError::InvalidLimit.to_string() == "the limit must be at least 1");
         check!(FrameworkError::Timeout.to_string() == "the request took too long");
     }
 
