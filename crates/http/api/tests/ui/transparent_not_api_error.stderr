@@ -1,0 +1,60 @@
+error[E0277]: the trait bound `std::io::Error: ApiError` is not satisfied
+ --> tests/ui/transparent_not_api_error.rs:7:8
+  |
+7 |     Io(std::io::Error),
+  |        ^^^^^^^^^^^^^^ the trait `ApiError` is not implemented for `std::io::Error`
+  |
+help: the following other types implement trait `ApiError`
+ --> tests/ui/transparent_not_api_error.rs:3:35
+  |
+3 | #[derive(Debug, thiserror::Error, ApiError)]
+  |                                   ^^^^^^^^ `AppError`
+  |
+ ::: src/framework_error.rs
+  |
+  | #[derive(Debug, ApiError)]
+  |                 ^^^^^^^^ `FrameworkError`
+  = note: this error originates in the derive macro `ApiError` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0277]: the trait bound `std::io::Error: uima_http_api::__private::utoipa::ToSchema` is not satisfied
+ --> tests/ui/transparent_not_api_error.rs:7:8
+  |
+7 |     Io(std::io::Error),
+  |        ^^^^^^^^^^^^^^ the trait `uima_http_api::__private::utoipa::ToSchema` is not implemented for `std::io::Error`
+  |
+  = help: the following other types implement trait `uima_http_api::__private::utoipa::ToSchema`:
+            &'t [T]
+            &'t mut [T]
+            &str
+            ()
+            AppError
+            BTreeMap<K, T>
+            BTreeSet<K>
+            Box<T>
+          and $N others
+
+error[E0277]: the trait bound `std::io::Error: uima_http_api::__private::utoipa::PartialSchema` is not satisfied
+ --> tests/ui/transparent_not_api_error.rs:7:8
+  |
+7 |     Io(std::io::Error),
+  |        ^^^^^^^^^^^^^^ the trait `uima_http_api::__private::utoipa::__dev::ComposeSchema` is not implemented for `std::io::Error`
+  |
+  = help: the following other types implement trait `uima_http_api::__private::utoipa::__dev::ComposeSchema`:
+            &[T]
+            &mut [T]
+            &str
+            BTreeMap<K, T>
+            BTreeSet<K>
+            Box<T>
+            Cow<'a, T>
+            HashMap<K, T, S>
+          and $N others
+  = note: required for `std::io::Error` to implement `uima_http_api::__private::utoipa::PartialSchema`
+note: required by a bound in `uima_http_api::__private::utoipa::ToSchema::schemas`
+ --> $CARGO/utoipa-$VERSION/src/lib.rs
+  |
+  | pub trait ToSchema: PartialSchema {
+  |                     ^^^^^^^^^^^^^ required by this bound in `ToSchema::schemas`
+...
+  |     fn schemas(
+  |

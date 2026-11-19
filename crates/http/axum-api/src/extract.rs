@@ -9,7 +9,7 @@ use axum::http::{HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
-use uima_http_api_error::FrameworkError;
+use uima_http_api::FrameworkError;
 
 /// [`axum::Json`], refusing a body with `unsupported-media-type` without a JSON content type,
 /// `invalid-json` when it doesn't parse, `invalid-body` when it isn't what `T` takes, and

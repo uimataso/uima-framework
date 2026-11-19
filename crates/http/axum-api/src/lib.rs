@@ -1,4 +1,4 @@
-//! A JSON API on axum, answering its errors with the body of `uima-http-api-error`.
+//! A JSON API on axum, answering its errors with the body of `uima-http-api`.
 //!
 //! - An app's error derives [`IntoResponse`](macro@IntoResponse) beside `ApiError`, so a handler
 //!   returns it.
@@ -11,7 +11,7 @@
 //! ```
 //! use axum::Router;
 //! use axum::routing::post;
-//! use uima_http_api_error::{ApiError, FrameworkError};
+//! use uima_http_api::{ApiError, FrameworkError};
 //! use uima_http_axum_api::{ApiJson, IntoResponse, with_fallbacks};
 //!
 //! #[derive(Debug, thiserror::Error, ApiError, IntoResponse)]
@@ -48,14 +48,14 @@ mod tests;
 #[doc(hidden)]
 pub mod __private {
     pub use axum;
-    pub use uima_http_api_error::ApiError;
+    pub use uima_http_api::ApiError;
 }
 
 use std::fmt;
 
 use axum::response::{IntoResponse as _, Response};
 use axum::routing::Router;
-use uima_http_api_error::{ApiError, ErrorResponse, FrameworkError};
+use uima_http_api::{ApiError, ErrorResponse, FrameworkError};
 use uima_http_axum::LoggedError;
 
 pub use extract::{ApiJson, ApiPath, ApiQuery, ApiRejection};

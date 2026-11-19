@@ -7,7 +7,7 @@ authors.workspace = true
 
 [dependencies]
 # local crates
-uima-http-api-error = { workspace = true }
+uima-http-api = { workspace = true }
 uima-http-axum = { workspace = true }
 uima-http-axum-api-macro = { workspace = true }
 
