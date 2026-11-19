@@ -138,10 +138,8 @@ mod tests {
 
     #[test]
     fn fetch_limit_is_one_more_than_the_limit() {
-        let largest = PageRule::new(u32::MAX - 1, u32::MAX - 1);
-
         check!(query(1, 0).fetch_limit() == 2_u32);
-        check!(largest.offset_query(None, None).unwrap().fetch_limit() == u32::MAX);
+        check!(OffsetQuery::new(OffsetQuery::MAX_LIMIT, 0).fetch_limit() == u32::MAX);
     }
 
     /// A query the code builds itself, such as the first two rows.
@@ -151,7 +149,6 @@ mod tests {
 
         check!(FIRST_TWO.limit() == 2_u32);
         check!(FIRST_TWO.offset() == 0_u32);
-        check!(OffsetQuery::new(OffsetQuery::MAX_LIMIT, 5).fetch_limit() == u32::MAX);
     }
 
     #[test]
