@@ -32,16 +32,16 @@ impl PageRule {
     ///
     /// # Panics
     ///
-    /// When `default` is 0 or above `max`, or `max` is `u32::MAX`. In a `const`, that fails the
-    /// build.
+    /// When `default` is 0 or above `max`, or `max` is above [`OffsetQuery::MAX_LIMIT`]. In a
+    /// `const`, that fails the build.
     pub const fn new(default: u32, max: u32) -> Self {
         assert!(
             0 < default && default <= max,
             "a page rule's default limit must be from 1 to its max",
         );
         assert!(
-            max < u32::MAX,
-            "a page rule's max must be below u32::MAX, so fetch_limit fits a u32",
+            max <= OffsetQuery::MAX_LIMIT,
+            "a page rule's max must be at most OffsetQuery::MAX_LIMIT",
         );
         Self { default, max }
     }
@@ -176,8 +176,19 @@ mod tests {
         );
     }
 
+    /// The largest max is the largest limit an offset query takes.
     #[test]
-    #[should_panic(expected = "max must be below u32::MAX")]
+    fn max_reaches_the_largest_offset_query() {
+        let rule = PageRule::new(1, OffsetQuery::MAX_LIMIT);
+
+        check!(
+            rule.offset_query(Some(OffsetQuery::MAX_LIMIT), None)
+                .is_ok()
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "max must be at most OffsetQuery::MAX_LIMIT")]
     fn a_rule_with_a_max_of_u32_max_panics() {
         let _ = PageRule::new(1, u32::MAX).offset_query(None, None);
     }
@@ -190,11 +201,15 @@ mod props {
 
     use super::*;
 
-    /// Any rule, often with a max of 1 or of `u32::MAX - 1`, and a default at its edges.
+    /// Any rule, often with a max of 1 or of `OffsetQuery::MAX_LIMIT`, and a default at its edges.
     fn rule() -> impl Strategy<Value = PageRule> {
-        prop_oneof![Just(1), Just(u32::MAX - 1), 1..u32::MAX]
-            .prop_flat_map(|max| (prop_oneof![Just(1), Just(max), 1..=max], Just(max)))
-            .prop_map(|(default, max)| PageRule::new(default, max))
+        prop_oneof![
+            Just(1),
+            Just(OffsetQuery::MAX_LIMIT),
+            1..=OffsetQuery::MAX_LIMIT
+        ]
+        .prop_flat_map(|max| (prop_oneof![Just(1), Just(max), 1..=max], Just(max)))
+        .prop_map(|(default, max)| PageRule::new(default, max))
     }
 
     /// Any limit or none, often at the edges, such as 0, 1, `max` and just past it.

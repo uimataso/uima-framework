@@ -1,8 +1,9 @@
 //! Offset pages: [`OffsetQuery`] reads `limit` rows from `offset`, and [`OffsetPage`] or
 //! [`CountedPage`] holds what the read returns.
 
-/// Which rows of a list to read: `limit` rows from `offset`. Only
-/// [`PageRule::offset_query`](crate::PageRule::offset_query) makes one.
+/// Which rows of a list to read: `limit` rows from `offset`. A request's query comes from
+/// [`PageRule::offset_query`](crate::PageRule::offset_query); [`OffsetQuery::new`] makes one the
+/// code itself asks for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct OffsetQuery {
     limit: u32,
@@ -10,7 +11,19 @@ pub struct OffsetQuery {
 }
 
 impl OffsetQuery {
-    pub(super) fn new(limit: u32, offset: u32) -> Self {
+    /// The largest limit, one below `u32::MAX` so [`fetch_limit`](Self::fetch_limit) fits a `u32`.
+    pub const MAX_LIMIT: u32 = u32::MAX - 1;
+
+    /// `limit` rows from `offset`, for a read the code itself makes, such as the first two rows.
+    ///
+    /// # Panics
+    ///
+    /// If `limit` is 0 or above [`MAX_LIMIT`](Self::MAX_LIMIT).
+    pub const fn new(limit: u32, offset: u32) -> Self {
+        assert!(
+            0 < limit && limit <= Self::MAX_LIMIT,
+            "an offset query's limit must be from 1 to OffsetQuery::MAX_LIMIT",
+        );
         Self { limit, offset }
     }
 
@@ -27,7 +40,7 @@ impl OffsetQuery {
     /// `limit + 1`, the `LIMIT` for a read that [`OffsetPage::from_rows`] takes, so it can tell
     /// whether more rows follow.
     pub fn fetch_limit(self) -> u32 {
-        // A rule's max is below u32::MAX, so this can't overflow.
+        // `new` keeps the limit at most MAX_LIMIT, so this can't overflow.
         self.limit + 1
     }
 }
@@ -125,10 +138,29 @@ mod tests {
 
     #[test]
     fn fetch_limit_is_one_more_than_the_limit() {
-        let largest = PageRule::new(u32::MAX - 1, u32::MAX - 1);
-
         check!(query(1, 0).fetch_limit() == 2_u32);
-        check!(largest.offset_query(None, None).unwrap().fetch_limit() == u32::MAX);
+        check!(OffsetQuery::new(OffsetQuery::MAX_LIMIT, 0).fetch_limit() == u32::MAX);
+    }
+
+    /// A query the code builds itself, such as the first two rows.
+    #[test]
+    fn new_builds_a_query_in_a_const() {
+        const FIRST_TWO: OffsetQuery = OffsetQuery::new(2, 0);
+
+        check!(FIRST_TWO.limit() == 2_u32);
+        check!(FIRST_TWO.offset() == 0_u32);
+    }
+
+    #[test]
+    #[should_panic(expected = "an offset query's limit must be from 1 to OffsetQuery::MAX_LIMIT")]
+    fn new_refuses_a_zero_limit() {
+        let _ = OffsetQuery::new(0, 0);
+    }
+
+    #[test]
+    #[should_panic(expected = "an offset query's limit must be from 1 to OffsetQuery::MAX_LIMIT")]
+    fn new_refuses_a_limit_fetch_limit_cant_hold() {
+        let _ = OffsetQuery::new(u32::MAX, 0);
     }
 
     #[test]
