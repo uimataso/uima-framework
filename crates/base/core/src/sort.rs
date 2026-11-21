@@ -21,7 +21,7 @@ impl SortOrder {
 /// key first.
 ///
 /// ```
-/// use uima_core::{Sort, SortOrder};
+/// use uima_core::Sort;
 ///
 /// #[derive(Clone, Copy)]
 /// enum UserKey {
@@ -38,10 +38,7 @@ impl SortOrder {
 ///     }
 /// }
 ///
-/// let sorts = [
-///     Sort { key: UserKey::JoinedAt, order: SortOrder::Desc },
-///     Sort { key: UserKey::Name, order: SortOrder::Asc },
-/// ];
+/// let sorts = [Sort::desc(UserKey::JoinedAt), Sort::asc(UserKey::Name)];
 /// let order_by: Vec<String> =
 ///     sorts.iter().map(|s| format!("{} {}", s.key.column(), s.order.as_sql())).collect();
 /// assert_eq!(order_by.join(", "), "joined_at DESC, name ASC");
@@ -50,6 +47,24 @@ impl SortOrder {
 pub struct Sort<K> {
     pub key: K,
     pub order: SortOrder,
+}
+
+impl<K> Sort<K> {
+    /// Sorts by `key`, ascending.
+    pub const fn asc(key: K) -> Self {
+        Self {
+            key,
+            order: SortOrder::Asc,
+        }
+    }
+
+    /// Sorts by `key`, descending.
+    pub const fn desc(key: K) -> Self {
+        Self {
+            key,
+            order: SortOrder::Desc,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -62,5 +77,24 @@ mod tests {
     fn as_sql_is_the_keyword() {
         check!(SortOrder::Asc.as_sql() == "ASC");
         check!(SortOrder::Desc.as_sql() == "DESC");
+    }
+
+    #[test]
+    fn asc_and_desc_sort_by_the_key_that_way() {
+        const NEWEST: Sort<&str> = Sort::desc("created_at");
+        check!(
+            NEWEST
+                == Sort {
+                    key: "created_at",
+                    order: SortOrder::Desc
+                }
+        );
+        check!(
+            Sort::asc("name")
+                == Sort {
+                    key: "name",
+                    order: SortOrder::Asc
+                }
+        );
     }
 }
