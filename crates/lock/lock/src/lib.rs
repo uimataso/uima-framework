@@ -32,12 +32,14 @@
 //! - `testing`: adds `testing::MemoryLockProvider` and the `contract` every provider passes.
 
 mod client;
+mod driver;
 mod provider;
 #[cfg(feature = "testing")]
 pub mod testing;
 mod ttl;
 
-pub use client::{HasLock, Lock, LockClient, LockDriver, LockGuard, TryLock, new};
+pub use client::{HasLock, Lock, LockClient, LockGuard, TryLock, new};
+pub use driver::LockDriver;
 #[cfg(feature = "testing")]
 pub use provider::contract;
 pub use provider::{Extended, Lease, LockProvider, TryAcquire};

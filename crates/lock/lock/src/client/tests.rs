@@ -1,5 +1,6 @@
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Duration;
 
 use tokio::task::JoinHandle;
 use uima_testing::{assert, check};
