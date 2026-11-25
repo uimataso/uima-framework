@@ -1,9 +1,10 @@
 //! [`LockProvider`], the store locks are kept in.
 
 use std::future::Future;
-use std::time::Duration;
 
 use uima_core::{PortResult, Uuid};
+
+use crate::Ttl;
 
 #[cfg(feature = "testing")]
 pub mod contract;
@@ -19,7 +20,7 @@ pub trait LockProvider: Send + Sync + 'static {
     fn try_acquire(
         &self,
         key: &str,
-        ttl: Duration,
+        ttl: Ttl,
     ) -> impl Future<Output = PortResult<TryAcquire>> + Send;
 
     /// Extends each lease by its own `ttl`, from now.
@@ -47,7 +48,7 @@ pub struct Lease {
     pub key: String,
     /// Made anew at each acquisition, so a holder extends or lets go only its own lease.
     pub token: Uuid,
-    pub ttl: Duration,
+    pub ttl: Ttl,
 }
 
 /// Whether a lease was still held when extended.

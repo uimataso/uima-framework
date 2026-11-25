@@ -78,7 +78,7 @@ impl<P: LockProvider> Lock for LockClient<P> {
         }
 
         let taken_at = Instant::now();
-        let lease = match self.provider.try_acquire(key, ttl.get()).await? {
+        let lease = match self.provider.try_acquire(key, ttl).await? {
             TryAcquire::Acquired(lease) => lease,
             TryAcquire::Busy => return Ok(TryLock::Busy),
         };
@@ -89,7 +89,7 @@ impl<P: LockProvider> Lock for LockClient<P> {
             lost: lost.clone(),
             taken_at,
         };
-        if Instant::now() >= deadline(taken_at, lease.ttl) {
+        if Instant::now() >= deadline(taken_at, lease.ttl.get()) {
             // Taken too slowly to keep, so it may be expiring already.
             lost.cancel();
         }
@@ -263,7 +263,8 @@ impl<P: LockProvider> LockDriver<P> {
         let provider = self.provider.clone();
         Box::pin(async move {
             // After its ttl the lease has expired, so it is let go already.
-            let result = match tokio::time::timeout(lease.ttl, provider.unlock(&lease)).await {
+            let result = match tokio::time::timeout(lease.ttl.get(), provider.unlock(&lease)).await
+            {
                 Ok(result) => result,
                 Err(_) => {
                     let late = anyhow!("no answer within the lease's ttl");
@@ -379,14 +380,14 @@ impl Kept {
 
     /// Schedules the next extend after one sent at `sent` held the lease.
     fn extended(&mut self, sent: Instant) {
-        let ttl = self.lease.ttl;
+        let ttl = self.lease.ttl.get();
         self.next_extend = sent + ttl / Self::EXTENDS_PER_TTL;
         self.deadline = deadline(sent, ttl);
     }
 
     /// Schedules the next extend soon, after one failed.
     fn retry_soon(&mut self) {
-        self.next_extend = Instant::now() + self.lease.ttl / Self::RETRIES_PER_TTL;
+        self.next_extend = Instant::now() + self.lease.ttl.get() / Self::RETRIES_PER_TTL;
     }
 
     fn due(&self) -> Instant {

@@ -2,12 +2,11 @@
 
 use std::collections::HashMap;
 use std::sync::Mutex;
-use std::time::Duration;
 
 use tokio::time::Instant;
 use uima_core::{PortResult, Uuid};
 
-use crate::{Extended, Lease, LockProvider, TryAcquire};
+use crate::{Extended, Lease, LockProvider, TryAcquire, Ttl};
 
 /// A [`LockProvider`] in memory, whose leases expire by tokio's clock, so a test can pause it.
 #[derive(Debug, Default)]
@@ -17,14 +16,14 @@ pub struct MemoryLockProvider {
 }
 
 impl LockProvider for MemoryLockProvider {
-    async fn try_acquire(&self, key: &str, ttl: Duration) -> PortResult<TryAcquire> {
+    async fn try_acquire(&self, key: &str, ttl: Ttl) -> PortResult<TryAcquire> {
         let now = Instant::now();
         let mut leases = self.leases.lock().unwrap();
         if leases.get(key).is_some_and(|&(_, expires)| expires > now) {
             return Ok(TryAcquire::Busy);
         }
         let token = Uuid::now_v7();
-        leases.insert(key.to_owned(), (token, now + ttl));
+        leases.insert(key.to_owned(), (token, now + ttl.get()));
         Ok(TryAcquire::Acquired(Lease {
             key: key.to_owned(),
             token,
@@ -39,7 +38,7 @@ impl LockProvider for MemoryLockProvider {
             .iter()
             .map(|lease| match held.get_mut(&lease.key) {
                 Some((token, expires)) if *token == lease.token && *expires > now => {
-                    *expires = now + lease.ttl;
+                    *expires = now + lease.ttl.get();
                     Extended::Held
                 }
                 _ => Extended::Lost,

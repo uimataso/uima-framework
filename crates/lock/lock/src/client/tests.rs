@@ -57,7 +57,7 @@ impl Faulty {
 }
 
 impl LockProvider for Faulty {
-    async fn try_acquire(&self, key: &str, ttl: Duration) -> PortResult<TryAcquire> {
+    async fn try_acquire(&self, key: &str, ttl: Ttl) -> PortResult<TryAcquire> {
         let acquired = self.store.try_acquire(key, ttl).await;
         let stop = self.on_acquire.lock().unwrap().take();
         if let Some(stop) = stop {
@@ -118,7 +118,7 @@ async fn lock(client: &impl Lock, key: &str) -> LockGuard {
 
 /// Whether the store holds `key`, asked without the client.
 async fn held(store: &Faulty, key: &str) -> bool {
-    match store.store.try_acquire(key, TTL).await.unwrap() {
+    match store.store.try_acquire(key, LEASE).await.unwrap() {
         TryAcquire::Busy => true,
         TryAcquire::Acquired(lease) => {
             store.store.unlock(&lease).await.unwrap();

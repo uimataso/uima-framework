@@ -40,10 +40,10 @@ impl Broken {
 }
 
 impl LockProvider for Broken {
-    async fn try_acquire(&self, key: &str, ttl: Duration) -> PortResult<TryAcquire> {
+    async fn try_acquire(&self, key: &str, ttl: Ttl) -> PortResult<TryAcquire> {
         let (store_key, store_ttl) = match self.breaks {
             Some(OneKey) => ("one", ttl),
-            Some(NeverExpires) => (key, ttl * 1000),
+            Some(NeverExpires) => (key, Ttl::MAX),
             _ => (key, ttl),
         };
         let got = self.store.try_acquire(store_key, store_ttl).await?;
@@ -58,7 +58,7 @@ impl LockProvider for Broken {
         };
         lease.key = key.to_owned();
         lease.ttl = if self.breaks == Some(WrongTtl) {
-            ttl * 2
+            Ttl::MAX
         } else {
             ttl
         };

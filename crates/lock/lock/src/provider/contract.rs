@@ -11,7 +11,7 @@ use uima_testing::{assert, check, run_case};
 use super::*;
 
 /// The `ttl` the cases take locks for.
-pub const TTL: Duration = Duration::from_secs(1);
+pub const TTL: Ttl = Ttl::MIN;
 
 /// Long enough after [`TTL`] that a lease taken for it has expired.
 const EXPIRED: Duration = Duration::from_millis(1500);
@@ -76,7 +76,7 @@ pub async fn extend_keeps_a_lease_past_its_ttl(provider: &impl LockProvider) -> 
     let key = key();
     let lease = acquire(provider, &key, TTL).await?;
     for _ in 0..3 {
-        tokio::time::sleep(TTL / 2).await;
+        tokio::time::sleep(TTL.get() / 2).await;
         check!(provider.extend(std::slice::from_ref(&lease)).await? == [Extended::Held]);
     }
 
@@ -85,7 +85,7 @@ pub async fn extend_keeps_a_lease_past_its_ttl(provider: &impl LockProvider) -> 
 }
 
 pub async fn extend_tells_each_lease_in_order(provider: &impl LockProvider) -> anyhow::Result<()> {
-    let long = TTL * 10;
+    let long = Ttl::from_secs(10);
     let first = acquire(provider, &key(), long).await?;
     let lost = acquire(provider, &key(), TTL).await?;
     let last = acquire(provider, &key(), long).await?;
@@ -124,7 +124,7 @@ fn key() -> String {
 }
 
 /// The lease `try_acquire` takes on `key` for `ttl`, failing when it is busy.
-async fn acquire(provider: &impl LockProvider, key: &str, ttl: Duration) -> anyhow::Result<Lease> {
+async fn acquire(provider: &impl LockProvider, key: &str, ttl: Ttl) -> anyhow::Result<Lease> {
     match provider.try_acquire(key, ttl).await? {
         TryAcquire::Acquired(lease) => Ok(lease),
         TryAcquire::Busy => anyhow::bail!("{key} is busy"),
