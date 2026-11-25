@@ -2,8 +2,8 @@ use std::time::Duration;
 
 use jiff::Timestamp;
 
-/// The [`Duration`] between two timestamps. The `_since` methods are named after
-/// [`std::time::Instant`]'s.
+/// The [`Duration`] between two timestamps, and a timestamp in seconds. The `_since` methods are
+/// named after [`std::time::Instant`]'s.
 pub trait TimestampExt {
     /// How long after `earlier` this is, or `None` when it's before `earlier`.
     fn checked_duration_since(self, earlier: Timestamp) -> Option<Duration>;
@@ -13,6 +13,10 @@ pub trait TimestampExt {
 
     /// How far apart this and `other` are, in either order.
     fn abs_duration_between(self, other: Timestamp) -> Duration;
+
+    /// Seconds since the Unix epoch, with the fraction, and negative before the epoch. Metrics hold
+    /// points in time this way.
+    fn unix_seconds(self) -> f64;
 }
 
 impl TimestampExt for Timestamp {
@@ -26,6 +30,10 @@ impl TimestampExt for Timestamp {
 
     fn abs_duration_between(self, other: Timestamp) -> Duration {
         self.duration_since(other).unsigned_abs()
+    }
+
+    fn unix_seconds(self) -> f64 {
+        self.as_duration().as_secs_f64()
     }
 }
 
@@ -75,5 +83,12 @@ mod tests {
         check!(Timestamp::MAX.checked_duration_since(Timestamp::MIN) == Some(span));
         check!(Timestamp::MIN.abs_duration_between(Timestamp::MAX) == span);
         check!(Timestamp::MIN.saturating_duration_since(Timestamp::MAX) == Duration::ZERO);
+    }
+
+    #[test]
+    fn unix_seconds_keep_the_fraction_and_go_negative_before_the_epoch() {
+        check!(Timestamp::UNIX_EPOCH.unix_seconds() == 0.0);
+        check!((at(100) + Duration::from_millis(1500)).unix_seconds() == 101.5);
+        check!((Timestamp::UNIX_EPOCH - Duration::from_millis(250)).unix_seconds() == -0.25);
     }
 }

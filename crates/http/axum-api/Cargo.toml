@@ -23,12 +23,12 @@ uima-log-tracing-subscriber = { workspace = true, features = ["testing"] }
 uima-testing = { workspace = true }
 
 # workspace dependencies
+futures-util = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt"] }
 tower = { workspace = true, features = ["util"] }
 tracing = { workspace = true }
 
 # crate-local dependencies
-futures-util = { version = "0.3", default-features = false }
 thiserror = "2"
 trybuild = "1"
 

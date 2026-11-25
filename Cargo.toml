@@ -35,7 +35,9 @@ uima-time = { path = "./crates/base/time", version = "0.0.0" }
 # workspace dependencies
 anyhow = "1"
 axum = { version = "0.8", default-features = false }
+futures-util = { version = "0.3", default-features = false }
 http = "1"
+metrics = "0.24"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", default-features = false }
