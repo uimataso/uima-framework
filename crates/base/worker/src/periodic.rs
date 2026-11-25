@@ -128,14 +128,10 @@ impl<J: Job> Runner<J> {
         let name = self.job.name().to_owned();
         let job_name = name.as_str();
 
-        // The gauges are set again after every run, and looked up each time, so a recorder
-        // installed after the start gets them from the next run on.
-        let started_at = clock.now().unix_seconds();
-        let mut last_success = None;
         let gauge = |metric: &'static str, at: f64| {
             metrics::gauge!(metric, "job_name" => name.clone()).set(at);
         };
-        gauge(STARTED, started_at);
+        gauge(STARTED, clock.now().unix_seconds());
 
         info!(job_name, "started");
 
@@ -173,18 +169,14 @@ impl<J: Job> Runner<J> {
             let ended_at = clock.now().unix_seconds();
             let outcome = match ran {
                 Ok(Ok(())) => {
-                    last_success = Some(ended_at);
+                    gauge(LAST_SUCCESS, ended_at);
                     "succeeded"
                 }
                 Ok(Err(_)) => "failed",
                 Err(_) => "panicked",
             };
-            metrics::counter!(RUNS, "job_name" => name.clone(), "outcome" => outcome).increment(1);
-            gauge(STARTED, started_at);
             gauge(LAST_ATTEMPT, ended_at);
-            if let Some(at) = last_success {
-                gauge(LAST_SUCCESS, at);
-            }
+            metrics::counter!(RUNS, "job_name" => name.clone(), "outcome" => outcome).increment(1);
 
             let stopping = cancel.is_cancelled();
             match (ran, stopping) {
