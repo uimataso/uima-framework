@@ -3170,6 +3170,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "uima-lock"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "tokio",
+ "tracing",
+ "uima-cancel",
+ "uima-core",
+ "uima-port-macro",
+ "uima-testing",
+]
+
+[[package]]
 name = "uima-log-tracing-subscriber"
 version = "0.0.0"
 dependencies = [

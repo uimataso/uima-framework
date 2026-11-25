@@ -1,0 +1,31 @@
+[package]
+name = "uima-lock"
+version.workspace = true
+rust-version.workspace = true
+edition.workspace = true
+authors.workspace = true
+
+[features]
+# test helpers
+testing = ["dep:uima-testing"]
+
+[dependencies]
+# local crates
+uima-cancel = { workspace = true }
+uima-core = { workspace = true }
+uima-port-macro = { workspace = true }
+
+# workspace dependencies
+anyhow = { workspace = true }
+tokio = { workspace = true, features = ["macros", "sync", "time"] }
+tracing = { workspace = true }
+
+# testing-only, behind the `testing` feature
+uima-testing = { workspace = true, optional = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt", "test-util"] }
+uima-testing = { workspace = true }
+
+[lints]
+workspace = true
