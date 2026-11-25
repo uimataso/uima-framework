@@ -1,7 +1,7 @@
 //! Test helpers.
 
 use std::collections::BTreeMap;
-use std::fmt;
+use std::fmt::{self, Write as _};
 use std::sync::{Arc, Mutex};
 
 use tracing::field::{Field, Visit};
@@ -89,7 +89,8 @@ pub struct CapturedEvent {
     pub level: Level,
     pub target: String,
     pub message: String,
-    /// The fields other than the message, each formatted as the event's own `%` or `?` asked.
+    /// The fields other than the message, each formatted as the event's own `%` or `?` asked, and
+    /// an error as its message then its sources, joined by `: `.
     pub fields: BTreeMap<String, String>,
     /// The spans the event was logged in, outermost first.
     pub spans: Vec<CapturedSpan>,
@@ -169,6 +170,16 @@ impl Visit for Fields {
     fn record_debug(&mut self, field: &Field, value: &dyn fmt::Debug) {
         self.record(field, format!("{value:?}"));
     }
+
+    fn record_error(&mut self, field: &Field, value: &(dyn std::error::Error + 'static)) {
+        let mut text = value.to_string();
+        let mut source = value.source();
+        while let Some(error) = source {
+            write!(text, ": {error}").expect("writing to a String can't fail");
+            source = error.source();
+        }
+        self.record(field, text);
+    }
 }
 
 impl Fields {
@@ -233,6 +244,30 @@ mod tests {
         check!(event.fields["path"] == "/etc/app");
         check!(event.fields["reason"] == r#""bad toml""#);
         check!(event.fields["retry"] == "Retry { tries: 2 }");
+    }
+
+    #[test]
+    fn an_error_field_is_its_message_then_its_sources() {
+        #[derive(Debug)]
+        struct Purge(std::io::Error);
+
+        impl fmt::Display for Purge {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                f.write_str("purge")
+            }
+        }
+
+        impl std::error::Error for Purge {
+            fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+                Some(&self.0)
+            }
+        }
+
+        let logs = LogCapture::start();
+        let error = Purge(std::io::Error::other("down"));
+        tracing::warn!(error = &error as &dyn std::error::Error, "run failed");
+
+        check!(logs.events()[0].fields["error"] == "purge: down");
     }
 
     #[test]

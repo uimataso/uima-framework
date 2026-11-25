@@ -1,0 +1,36 @@
+[package]
+name = "uima-worker"
+version.workspace = true
+rust-version.workspace = true
+edition.workspace = true
+authors.workspace = true
+
+[dependencies]
+# local crates
+uima-cancel = { workspace = true }
+uima-runtime = { workspace = true }
+uima-time = { workspace = true }
+
+# workspace dependencies
+anyhow = { workspace = true }
+futures-util = { workspace = true, features = ["std"] }
+metrics = { workspace = true }
+tokio = { workspace = true, features = ["macros", "time"] }
+tracing = { workspace = true }
+
+[dev-dependencies]
+# local crates
+uima-log-tracing-subscriber = { workspace = true, features = ["testing"] }
+uima-testing = { workspace = true }
+uima-time = { workspace = true, features = ["testing"] }
+
+# workspace dependencies
+tokio = { workspace = true, features = ["macros", "rt", "test-util"] }
+
+# crate-local dependencies
+metrics-util = { version = "0.20", default-features = false, features = [
+  "debugging",
+] }
+
+[lints]
+workspace = true

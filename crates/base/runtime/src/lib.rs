@@ -1,22 +1,33 @@
-//! Process-level plumbing for a service's `main`, such as stopping on a shutdown signal.
+//! Process-level plumbing for a service's `main`, such as running its [`Subsystem`]s until a
+//! shutdown signal.
 //!
 //! # Examples
 //!
 //! ```no_run
-//! # async fn serve(_: impl std::future::Future<Output = ()>) {}
-//! # async fn example() {
-//! use uima_cancel::CancelToken;
+//! # async fn example(
+//! #     server: impl uima_runtime::Subsystem,
+//! #     purge: impl uima_runtime::Subsystem,
+//! # ) -> anyhow::Result<()> {
+//! use uima_cancel::{CancelExt as _, CancelToken};
+//! use uima_runtime::Subsystem as _;
 //!
+//! // Each part stops the others when it ends, such as when the server fails to bind.
 //! let cancel = CancelToken::new();
-//! tokio::join!(
+//! let ((), served, purged) = tokio::join!(
 //!     uima_runtime::cancel_on_shutdown_signal(&cancel),
-//!     serve(cancel.cancelled()),
+//!     server.run(cancel.clone()).cancel_on_exit(&cancel),
+//!     purge.run(cancel.clone()).cancel_on_exit(&cancel),
 //! );
+//! served?;
+//! purged?;
+//! # Ok(())
 //! # }
 //! ```
 
 mod signal;
+mod subsystem;
 mod timeout;
 
 pub use signal::{cancel_on_shutdown_signal, shutdown_signal};
+pub use subsystem::Subsystem;
 pub use timeout::TimeoutExt;

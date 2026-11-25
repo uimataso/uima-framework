@@ -10,6 +10,7 @@ authors.workspace = true
 uima-cancel = { workspace = true }
 
 # workspace dependencies
+anyhow = { workspace = true }
 tokio = { workspace = true, features = ["macros", "signal", "time"] }
 tracing = { workspace = true }
 
