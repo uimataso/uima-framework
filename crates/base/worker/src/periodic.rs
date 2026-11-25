@@ -1,4 +1,10 @@
 //! Running a job over and over on a schedule.
+//!
+//! # Metrics
+//!
+//! A [`Runner`] keeps the metrics named by [`STARTED`], [`LAST_ATTEMPT`], [`LAST_SUCCESS`] and
+//! [`RUNS`], each with the job's name as its `job_name` label, as in its logs. Times are in unix
+//! seconds.
 
 use std::any::Any;
 use std::future::Future;
@@ -16,9 +22,6 @@ use uima_runtime::Subsystem;
 #[cfg(test)]
 mod tests;
 
-// The metrics a runner keeps, each with the job's name as its `job_name` label, as in its logs.
-// Times are in unix seconds.
-
 /// The gauge of when the runner started.
 pub const STARTED: &str = "job_started_timestamp_seconds";
 
@@ -28,7 +31,7 @@ pub const LAST_ATTEMPT: &str = "job_last_attempt_timestamp_seconds";
 /// The gauge of when the last run that succeeded ended. Until one does, there is none.
 pub const LAST_SUCCESS: &str = "job_last_success_timestamp_seconds";
 
-/// The counter of runs, by their `outcome` label: `succeeded`, `failed` or `panicked`.
+/// The counter of runs, by their `outcome` label, one of `succeeded`, `failed` or `panicked`.
 pub const RUNS: &str = "job_runs_total";
 
 /// A job that runs over and over, such as a cleanup, through [`Runner`].
@@ -81,7 +84,7 @@ pub enum FirstRun {
 ///
 /// An alert on the age of the last success, or of the start until one succeeds, finds a job that
 /// stopped or keeps failing. Taking the latest across instances, over a window longer than a
-/// period plus the threshold, keeps it through restarts:
+/// period plus the threshold, keeps it through restarts, as this alert does.
 ///
 /// ```promql
 /// time() - max by (job_name) (
@@ -99,6 +102,8 @@ pub struct Runner<J> {
 }
 
 impl<J: Job> Runner<J> {
+    /// A runner of `job` on `config`.
+    ///
     /// Fails when `config`'s `every` is zero.
     pub fn new(job: J, config: Config) -> anyhow::Result<Self> {
         anyhow::ensure!(
