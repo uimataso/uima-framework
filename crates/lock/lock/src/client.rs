@@ -130,44 +130,27 @@ impl<P: LockProvider> LockDriver<P> {
     /// guards' `lost` as well, but leaves their locks to expire. A driver dropped without
     /// running cancels nothing.
     pub async fn run(mut self, cancel: CancelToken) {
-        let mut kept = HashMap::new();
+        let mut driving = Driving::new(self.provider);
         // Whether a client or guard is left to send messages.
         let mut open = true;
-        let mut extending: Option<Call<ExtendReply>> = None;
-        let mut unlocking: FuturesUnordered<Call<UnlockReply>> = FuturesUnordered::new();
 
         loop {
-            // While an extend is out, only the deadlines are due.
-            let due = kept
-                .values()
-                .map(|kept: &Kept| {
-                    if extending.is_some() {
-                        kept.deadline
-                    } else {
-                        kept.due()
-                    }
-                })
-                .min();
+            let due = driving.due();
             tokio::select! {
                 biased;
                 () = cancel.cancelled() => break,
                 // With none left, it still lets go of the locks dropped last, and runs until
                 // cancelled, since ending early would stop a service that runs it.
                 message = self.messages.recv(), if open => match message {
-                    Some(message) => self.handle(message, &mut kept, &unlocking),
+                    Some(message) => driving.handle(message),
                     None => open = false,
                 },
-                extended = poll(extending.as_mut()) => {
-                    extending = None;
-                    extended.apply(&mut kept);
-                }
-                Some(unlocked) = unlocking.next() => unlocked.reply(),
+                reply = poll(driving.extending.as_mut()) => driving.extended(reply),
+                Some(reply) = driving.unlocking.next() => reply.answer(),
                 () = sleep_until(due) => {
                     let now = Instant::now();
-                    self.give_up_late(now, &mut kept, &unlocking);
-                    if extending.is_none() {
-                        extending = self.extend_due(now, &kept);
-                    }
+                    driving.give_up_late(now);
+                    driving.extend_due(now);
                 }
             }
         }
@@ -175,111 +158,14 @@ impl<P: LockProvider> LockDriver<P> {
         // Closed first, so a lock taken from now on is let go by its taker. Every lost is
         // cancelled before any unlock is waited on, and an extend still out is dropped.
         self.messages.close();
-        drop(extending);
+        driving.extending = None;
         while let Ok(message) = self.messages.try_recv() {
-            self.handle(message, &mut kept, &unlocking);
+            driving.handle(message);
         }
-        for (_, kept) in kept.drain() {
-            unlocking.push(self.unlock(kept.lease.clone(), None));
+        driving.let_all_go();
+        while let Some(reply) = driving.unlocking.next().await {
+            reply.answer();
         }
-        while let Some(unlocked) = unlocking.next().await {
-            unlocked.reply();
-        }
-    }
-
-    fn handle(
-        &self,
-        message: Message,
-        kept: &mut HashMap<Uuid, Kept>,
-        unlocking: &FuturesUnordered<Call<UnlockReply>>,
-    ) {
-        match message {
-            Message::Held {
-                lease,
-                lost,
-                taken_at,
-            } => {
-                kept.insert(lease.token, Kept::new(lease, lost, taken_at));
-            }
-            Message::Release { lease, done } => {
-                kept.remove(&lease.token);
-                unlocking.push(self.unlock(lease, Some(done)));
-            }
-            Message::Dropped { lease } => {
-                kept.remove(&lease.token);
-                unlocking.push(self.unlock(lease, None));
-            }
-        }
-    }
-
-    /// Gives up on the leases not extended in time, letting them go in case the store still
-    /// holds them.
-    fn give_up_late(
-        &self,
-        now: Instant,
-        kept: &mut HashMap<Uuid, Kept>,
-        unlocking: &FuturesUnordered<Call<UnlockReply>>,
-    ) {
-        let late: Vec<Uuid> = kept
-            .values()
-            .filter(|kept| kept.deadline <= now)
-            .map(|kept| kept.lease.token)
-            .collect();
-        for token in late {
-            if let Some(kept) = kept.remove(&token) {
-                warn!(key = kept.lease.key, "lost a lock not extended in time");
-                unlocking.push(self.unlock(kept.lease.clone(), None));
-            }
-        }
-    }
-
-    /// Sends one extend of the leases due, if any are.
-    fn extend_due(&self, now: Instant, kept: &HashMap<Uuid, Kept>) -> Option<Call<ExtendReply>> {
-        let due: Vec<Lease> = kept
-            .values()
-            .filter(|kept| kept.next_extend <= now)
-            .map(|kept| kept.lease.clone())
-            .collect();
-        if due.is_empty() {
-            return None;
-        }
-
-        let provider = self.provider.clone();
-        Some(Box::pin(async move {
-            let result = provider.extend(&due).await;
-            ExtendReply {
-                sent: now,
-                leases: due,
-                result,
-            }
-        }))
-    }
-
-    fn unlock(
-        &self,
-        lease: Lease,
-        done: Option<oneshot::Sender<PortResult<()>>>,
-    ) -> Call<UnlockReply> {
-        let provider = self.provider.clone();
-        Box::pin(async move {
-            // After its ttl the lease has expired, so it is let go already.
-            let result = match tokio::time::timeout(lease.ttl.get(), provider.unlock(&lease)).await
-            {
-                Ok(result) => result,
-                Err(_) => {
-                    let late = anyhow!("no answer within the lease's ttl");
-                    Err(Failure::new(FailureKind::Timeout, late).into())
-                }
-            };
-            if let Err(error) = &result {
-                warn!(
-                    key = lease.key,
-                    error = error as &dyn Error,
-                    "failed to let a lock go"
-                );
-            }
-            UnlockReply { result, done }
-        })
     }
 }
 
@@ -348,6 +234,152 @@ enum Message {
     Dropped { lease: Lease },
 }
 
+/// What a running [`LockDriver`] keeps track of.
+struct Driving<P> {
+    provider: Arc<P>,
+    kept: HashMap<Uuid, Kept>,
+    /// The one extend out, if any.
+    extending: Option<Call<ExtendReply>>,
+    unlocking: FuturesUnordered<Call<UnlockReply>>,
+}
+
+impl<P: LockProvider> Driving<P> {
+    fn new(provider: Arc<P>) -> Self {
+        Self {
+            provider,
+            kept: HashMap::new(),
+            extending: None,
+            unlocking: FuturesUnordered::new(),
+        }
+    }
+
+    /// When something is next due, if anything is. While an extend is out, only the deadlines
+    /// are.
+    fn due(&self) -> Option<Instant> {
+        self.kept
+            .values()
+            .map(|kept| {
+                if self.extending.is_some() {
+                    kept.deadline
+                } else {
+                    kept.due()
+                }
+            })
+            .min()
+    }
+
+    fn handle(&mut self, message: Message) {
+        match message {
+            Message::Held {
+                lease,
+                lost,
+                taken_at,
+            } => {
+                self.kept
+                    .insert(lease.token, Kept::new(lease, lost, taken_at));
+            }
+            Message::Release { lease, done } => {
+                self.kept.remove(&lease.token);
+                self.unlock(lease, Some(done));
+            }
+            Message::Dropped { lease } => {
+                self.kept.remove(&lease.token);
+                self.unlock(lease, None);
+            }
+        }
+    }
+
+    /// Gives up on the leases not extended in time, letting them go in case the store still
+    /// holds them.
+    fn give_up_late(&mut self, now: Instant) {
+        let late: Vec<Uuid> = self
+            .kept
+            .values()
+            .filter(|kept| kept.deadline <= now)
+            .map(|kept| kept.lease.token)
+            .collect();
+        for token in late {
+            if let Some(kept) = self.kept.remove(&token) {
+                warn!(key = kept.lease.key, "lost a lock not extended in time");
+                self.unlock(kept.lease.clone(), None);
+            }
+        }
+    }
+
+    /// Sends one extend of the leases due, unless one is out already.
+    fn extend_due(&mut self, now: Instant) {
+        if self.extending.is_some() {
+            return;
+        }
+        let due: Vec<Lease> = self
+            .kept
+            .values()
+            .filter(|kept| kept.next_extend <= now)
+            .map(|kept| kept.lease.clone())
+            .collect();
+        if due.is_empty() {
+            return;
+        }
+
+        let provider = self.provider.clone();
+        self.extending = Some(Box::pin(async move {
+            let result = provider.extend(&due).await;
+            ExtendReply {
+                sent: now,
+                leases: due,
+                result,
+            }
+        }));
+    }
+
+    /// Updates the leases still kept from what an extend got, dropping those the store lost.
+    fn extended(&mut self, reply: ExtendReply) {
+        self.extending = None;
+        let extended = match reply.result {
+            Ok(extended) => extended,
+            Err(error) => {
+                debug!(
+                    error = &error as &dyn Error,
+                    "failed to extend locks; retrying"
+                );
+                for lease in &reply.leases {
+                    if let Some(kept) = self.kept.get_mut(&lease.token) {
+                        kept.retry_soon();
+                    }
+                }
+                return;
+            }
+        };
+        for (lease, extended) in reply.leases.iter().zip(extended) {
+            match extended {
+                Extended::Held => {
+                    if let Some(kept) = self.kept.get_mut(&lease.token) {
+                        kept.extended(reply.sent);
+                    }
+                }
+                Extended::Lost => {
+                    if self.kept.remove(&lease.token).is_some() {
+                        warn!(key = lease.key, "lost a lock taken by another");
+                    }
+                }
+            }
+        }
+    }
+
+    /// Stops keeping every lock, cancelling their `lost`, and lets them go.
+    fn let_all_go(&mut self) {
+        for (_, kept) in self.kept.drain() {
+            self.unlocking
+                .push(unlock(self.provider.clone(), kept.lease.clone(), None));
+        }
+    }
+
+    fn unlock(&mut self, lease: Lease, done: Option<oneshot::Sender<PortResult<()>>>) {
+        self.unlocking
+            .push(unlock(self.provider.clone(), lease, done));
+    }
+}
+
 /// A lock the driver keeps.
 ///
 /// Dropping it cancels `lost`, so a lock is lost once the driver stops keeping it, however that
@@ -411,41 +443,6 @@ struct ExtendReply {
     result: PortResult<Vec<Extended>>,
 }
 
-impl ExtendReply {
-    /// Updates the leases still kept, dropping those the store lost.
-    fn apply(self, kept: &mut HashMap<Uuid, Kept>) {
-        let extended = match self.result {
-            Ok(extended) => extended,
-            Err(error) => {
-                debug!(
-                    error = &error as &dyn Error,
-                    "failed to extend locks; retrying"
-                );
-                for lease in &self.leases {
-                    if let Some(kept) = kept.get_mut(&lease.token) {
-                        kept.retry_soon();
-                    }
-                }
-                return;
-            }
-        };
-        for (lease, extended) in self.leases.iter().zip(extended) {
-            match extended {
-                Extended::Held => {
-                    if let Some(kept) = kept.get_mut(&lease.token) {
-                        kept.extended(self.sent);
-                    }
-                }
-                Extended::Lost => {
-                    if kept.remove(&lease.token).is_some() {
-                        warn!(key = lease.key, "lost a lock taken by another");
-                    }
-                }
-            }
-        }
-    }
-}
-
 /// What an unlock got, for the [`LockGuard::release`] waiting on it, if any.
 struct UnlockReply {
     result: PortResult<()>,
@@ -453,11 +450,37 @@ struct UnlockReply {
 }
 
 impl UnlockReply {
-    fn reply(self) {
+    /// Gives the result to the [`LockGuard::release`] waiting on it, if any.
+    fn answer(self) {
         if let Some(done) = self.done {
             done.send(self.result).ok();
         }
     }
+}
+
+/// Lets `lease` go, giving up after its ttl, when it has expired anyway.
+fn unlock<P: LockProvider>(
+    provider: Arc<P>,
+    lease: Lease,
+    done: Option<oneshot::Sender<PortResult<()>>>,
+) -> Call<UnlockReply> {
+    Box::pin(async move {
+        let result = match tokio::time::timeout(lease.ttl.get(), provider.unlock(&lease)).await {
+            Ok(result) => result,
+            Err(_) => {
+                let late = anyhow!("no answer within the lease's ttl");
+                Err(Failure::new(FailureKind::Timeout, late).into())
+            }
+        };
+        if let Err(error) = &result {
+            warn!(
+                key = lease.key,
+                error = error as &dyn Error,
+                "failed to let a lock go"
+            );
+        }
+        UnlockReply { result, done }
+    })
 }
 
 /// Waits for `call`, or forever without one.
