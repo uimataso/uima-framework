@@ -3197,15 +3197,10 @@ name = "uima-runtime"
 version = "0.0.0"
 dependencies = [
  "anyhow",
- "futures-util",
- "metrics",
- "metrics-util",
  "tokio",
  "tracing",
  "uima-cancel",
- "uima-log-tracing-subscriber",
  "uima-testing",
- "uima-time",
 ]
 
 [[package]]
@@ -3226,6 +3221,23 @@ dependencies = [
  "serde_json",
  "uima-port-macro",
  "uima-testing",
+]
+
+[[package]]
+name = "uima-worker"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "futures-util",
+ "metrics",
+ "metrics-util",
+ "tokio",
+ "tracing",
+ "uima-cancel",
+ "uima-log-tracing-subscriber",
+ "uima-runtime",
+ "uima-testing",
+ "uima-time",
 ]
 
 [[package]]

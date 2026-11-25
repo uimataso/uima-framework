@@ -6,7 +6,7 @@
 //! ```no_run
 //! # async fn example(
 //! #     server: impl uima_runtime::Subsystem,
-//! #     purge: uima_runtime::periodic::Runner<impl uima_runtime::periodic::Job>,
+//! #     purge: impl uima_runtime::Subsystem,
 //! # ) -> anyhow::Result<()> {
 //! use uima_cancel::{CancelExt as _, CancelToken};
 //! use uima_runtime::Subsystem as _;
@@ -23,8 +23,6 @@
 //! # Ok(())
 //! # }
 //! ```
-
-pub mod periodic;
 
 mod signal;
 mod subsystem;

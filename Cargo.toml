@@ -29,6 +29,7 @@ uima-http-axum = { path = "./crates/http/axum", version = "0.0.0" }
 uima-http-axum-api-macro = { path = "./crates/http/axum-api-macro", version = "0.0.0" }
 uima-log-tracing-subscriber = { path = "./crates/log/tracing-subscriber", version = "0.0.0" }
 uima-port-macro = { path = "./crates/base/port-macro", version = "0.0.0" }
+uima-runtime = { path = "./crates/base/runtime", version = "0.0.0" }
 uima-testing = { path = "./crates/base/testing", version = "0.0.0" }
 uima-time = { path = "./crates/base/time", version = "0.0.0" }
 

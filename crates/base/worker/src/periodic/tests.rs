@@ -9,7 +9,7 @@ use uima_testing::{assert, check};
 use uima_time::testing::SimulatedClock;
 
 use super::*;
-use crate::TimeoutExt as _;
+use uima_runtime::TimeoutExt as _;
 
 const EVERY: Duration = Duration::from_secs(10);
 
