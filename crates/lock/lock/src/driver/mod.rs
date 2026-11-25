@@ -94,7 +94,10 @@ impl Driver {
     }
 
     /// Has the driver keep `lease`, taken by a request sent at `taken_at`, and cancel `lost` once
-    /// it is lost; false once the driver has stopped.
+    /// it is lost.
+    ///
+    /// True when the driver will keep it. False when the driver has stopped, so nothing will
+    /// extend the lease or let it go, and the caller lets it go itself.
     pub(crate) fn held(&self, lease: Lease, lost: CancelToken, taken_at: Instant) -> bool {
         let held = Message::Held {
             lease,
