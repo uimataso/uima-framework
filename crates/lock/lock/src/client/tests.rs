@@ -2,6 +2,7 @@ use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
+use anyhow::anyhow;
 use tokio::task::JoinHandle;
 use uima_testing::{assert, check};
 
@@ -442,14 +443,16 @@ async fn a_lock_given_up_is_let_go_before_its_ttl_ends() {
 }
 
 #[tokio::test(start_paused = true)]
-async fn a_lock_taken_too_slowly_to_keep_is_lost_as_it_is_given() {
+async fn a_lock_taken_too_slowly_to_keep_fails_and_is_let_go() {
     let store = Faulty::default();
     let (client, _cancel, _driving) = start(&store);
     store.reply_in(TTL.get());
 
-    let guard = lock(&client, "purge").await;
+    assert!(let Err(_) = client.try_lock("purge", TTL).await);
+    store.reply_in(Duration::ZERO);
+    settle().await;
 
-    check!(guard.lost().is_cancelled());
+    check!(!held(&store, "purge").await);
 }
 
 #[tokio::test(start_paused = true)]

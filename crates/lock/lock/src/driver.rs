@@ -14,7 +14,6 @@ use tracing::{debug, warn};
 use uima_cancel::CancelToken;
 use uima_core::{Failure, FailureKind, PortResult, Uuid};
 
-use crate::client::Message;
 use crate::{Extended, Lease, LockProvider};
 
 /// Keeps the locks its [`LockClient`](crate::LockClient) took, extending the held ones, letting
@@ -29,20 +28,20 @@ pub struct LockDriver<P> {
     messages: mpsc::UnboundedReceiver<Message>,
     /// Kept so `messages` stays open with every client and guard gone, since the driver still
     /// runs until cancelled, as ending early would stop a service that runs it.
-    _open: mpsc::UnboundedSender<Message>,
+    _open: Driver,
 }
 
 impl<P: LockProvider> LockDriver<P> {
-    pub(crate) fn new(
-        provider: Arc<P>,
-        messages: mpsc::UnboundedReceiver<Message>,
-        open: mpsc::UnboundedSender<Message>,
-    ) -> Self {
-        Self {
+    /// A driver over `provider`, and the [`Driver`] to tell it what to keep through.
+    pub(crate) fn new(provider: Arc<P>) -> (Self, Driver) {
+        let (sender, messages) = mpsc::unbounded_channel();
+        let driver = Driver(sender);
+        let lock_driver = Self {
             provider,
             messages,
-            _open: open,
-        }
+            _open: driver.clone(),
+        };
+        (lock_driver, driver)
     }
 
     /// Keeps the locks until `cancel`, then cancels every guard's
@@ -83,6 +82,69 @@ impl<P: LockProvider> LockDriver<P> {
             joined(reply).answer();
         }
     }
+}
+
+/// How a [`LockClient`](crate::LockClient) and its guards tell the [`LockDriver`] what to keep.
+#[derive(Clone, Debug)]
+pub(crate) struct Driver(mpsc::UnboundedSender<Message>);
+
+impl Driver {
+    /// Whether the driver has stopped or been dropped.
+    pub(crate) fn is_stopped(&self) -> bool {
+        self.0.is_closed()
+    }
+
+    /// Has the driver keep `lease`, taken by a request sent at `taken_at`, and cancel `lost` once
+    /// it is lost; false once the driver has stopped.
+    pub(crate) fn held(&self, lease: Lease, lost: CancelToken, taken_at: Instant) -> bool {
+        let held = Message::Held {
+            lease,
+            lost,
+            taken_at,
+        };
+        self.0.send(held).is_ok()
+    }
+
+    /// Has the driver let `lease` go, waiting until the store has.
+    ///
+    /// A driver that has ended is not an error, having let go of it as it stopped, or left it to
+    /// expire.
+    pub(crate) async fn release(&self, lease: Lease) -> PortResult<()> {
+        let (done, released) = oneshot::channel();
+        if self.0.send(Message::Release { lease, done }).is_err() {
+            return Ok(());
+        }
+        match released.await {
+            Ok(released) => released,
+            // The driver ended before answering.
+            Err(_) => Ok(()),
+        }
+    }
+
+    /// Has the driver let `lease` go soon, without waiting.
+    pub(crate) fn dropped(&self, lease: Lease) {
+        // A driver that has ended let go of it as it stopped, or left it to expire.
+        self.0.send(Message::Dropped { lease }).ok();
+    }
+}
+
+/// What a [`Driver`] sends.
+#[derive(Debug)]
+enum Message {
+    /// A lock was taken by a request sent at `taken_at`; keep it alive and cancel `lost` once it
+    /// is lost.
+    Held {
+        lease: Lease,
+        lost: CancelToken,
+        taken_at: Instant,
+    },
+    /// Let the lock go; answer through `done` once the store has.
+    Release {
+        lease: Lease,
+        done: oneshot::Sender<PortResult<()>>,
+    },
+    /// A guard was dropped; let the lock go.
+    Dropped { lease: Lease },
 }
 
 /// What a running [`LockDriver`] keeps track of.
