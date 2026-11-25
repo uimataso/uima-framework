@@ -4,7 +4,8 @@ use std::future::Future;
 
 use uima_cancel::CancelToken;
 
-/// A part of a service that runs until the service stops, such as its HTTP server or a periodic job.
+/// A part of a service that runs until the service stops, such as its HTTP server or a periodic
+/// job.
 pub trait Subsystem: Send {
     /// Names the subsystem, such as in logs.
     fn name(&self) -> &str;
