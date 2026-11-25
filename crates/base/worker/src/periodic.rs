@@ -16,14 +16,25 @@ use uima_runtime::Subsystem;
 #[cfg(test)]
 mod tests;
 
-/// The gauge of when a job's last run succeeded, or it started if none has yet, in unix seconds,
-/// with the job's name as its `job_name` label, as in the job's logs.
-pub const HEARTBEAT: &str = "job_last_success_timestamp_seconds";
+// The metrics a runner keeps, each with the job's name as its `job_name` label, as in its logs.
+// Times are in unix seconds.
+
+/// The gauge of when the runner started.
+pub const STARTED: &str = "job_started_timestamp_seconds";
+
+/// The gauge of when the last run ended, however it ended.
+pub const LAST_ATTEMPT: &str = "job_last_attempt_timestamp_seconds";
+
+/// The gauge of when the last run that succeeded ended. Until one does, there is none.
+pub const LAST_SUCCESS: &str = "job_last_success_timestamp_seconds";
+
+/// The counter of runs, by their `outcome` label: `succeeded`, `failed` or `panicked`.
+pub const RUNS: &str = "job_runs_total";
 
 /// A job that runs over and over, such as a cleanup, through [`Runner`].
 pub trait Job: Send {
-    /// Names the job as `job_name` in logs and in the [`HEARTBEAT`] gauge. Each job in a service
-    /// needs its own, non-empty name, since jobs sharing a name share one heartbeat.
+    /// Names the job as `job_name` in logs and metrics. Each job in a service needs its own,
+    /// non-empty name, since jobs sharing a name share their metrics.
     fn name(&self) -> &str;
 
     /// Runs the job once.
@@ -66,8 +77,18 @@ pub enum FirstRun {
 /// A [`Subsystem`] that runs a [`Job`] on its [`Config`] until cancelled.
 ///
 /// A failed run is logged and the job runs again on schedule; a run that panics is logged and
-/// counts as failed. It keeps the [`HEARTBEAT`] gauge, so while the service stays up, an alert on
-/// its age finds a job that stopped or keeps failing. A restart sets it to the start again.
+/// counts as failed.
+///
+/// An alert on the age of the last success, or of the start until one succeeds, finds a job that
+/// stopped or keeps failing. Taking the latest across instances, over a window longer than a
+/// period plus the threshold, keeps it through restarts:
+///
+/// ```promql
+/// time() - max by (job_name) (
+///   max_over_time(job_last_success_timestamp_seconds[2d])
+///   or job_started_timestamp_seconds
+/// ) > 3600
+/// ```
 ///
 /// Once cancelled, it ends without waiting for the next run, and a run in progress finishes
 /// first, as long as [`Subsystem::run`] is awaited to the end; dropping it drops the run where it
@@ -101,18 +122,20 @@ impl<J: Job> Subsystem for Runner<J> {
 }
 
 impl<J: Job> Runner<J> {
-    /// [`Subsystem::run`], reading the time for the heartbeat from `clock`.
+    /// [`Subsystem::run`], reading the time for its metrics from `clock`.
     async fn run_on(mut self, cancel: CancelToken, clock: &impl Clock) -> anyhow::Result<()> {
         // Owned, since each run borrows the job mutably.
         let name = self.job.name().to_owned();
         let job_name = name.as_str();
 
-        // Set after every run, and looked up each time, so a recorder installed after the start
-        // gets the last success from the next run on, even while runs fail.
-        let mut last_success = clock.now().unix_seconds();
-
-        let beat = |at: f64| metrics::gauge!(HEARTBEAT, "job_name" => name.clone()).set(at);
-        beat(last_success);
+        // The gauges are set again after every run, and looked up each time, so a recorder
+        // installed after the start gets them from the next run on.
+        let started_at = clock.now().unix_seconds();
+        let mut last_success = None;
+        let gauge = |metric: &'static str, at: f64| {
+            metrics::gauge!(metric, "job_name" => name.clone()).set(at);
+        };
+        gauge(STARTED, started_at);
 
         info!(job_name, "started");
 
@@ -147,11 +170,21 @@ impl<J: Job> Runner<J> {
             });
             let took = finished - started;
 
-            if let Ok(Ok(())) = ran {
-                last_success = clock.now().unix_seconds();
+            let ended_at = clock.now().unix_seconds();
+            let outcome = match ran {
+                Ok(Ok(())) => {
+                    last_success = Some(ended_at);
+                    "succeeded"
+                }
+                Ok(Err(_)) => "failed",
+                Err(_) => "panicked",
+            };
+            metrics::counter!(RUNS, "job_name" => name.clone(), "outcome" => outcome).increment(1);
+            gauge(STARTED, started_at);
+            gauge(LAST_ATTEMPT, ended_at);
+            if let Some(at) = last_success {
+                gauge(LAST_SUCCESS, at);
             }
-
-            beat(last_success);
 
             let stopping = cancel.is_cancelled();
             match (ran, stopping) {

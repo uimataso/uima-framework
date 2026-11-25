@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::pin::pin;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
@@ -511,9 +512,61 @@ fn wall(outcomes: &[Outcome], clock: &SimulatedClock) -> (Wall, Arc<Mutex<Vec<f6
     (wall, ended_at)
 }
 
-/// The heartbeat after runs ending in `outcomes`, the clock's time when the job started, and at
-/// the end of each run.
-async fn heartbeat_after(outcomes: &[Outcome]) -> (f64, f64, Vec<f64>) {
+/// The metrics a recorder saw from a [`Wall`].
+#[derive(Debug, Default, PartialEq)]
+struct Seen {
+    started: Option<f64>,
+    last_attempt: Option<f64>,
+    last_success: Option<f64>,
+    /// The runs counted, by their `outcome`.
+    runs: BTreeMap<String, u64>,
+}
+
+/// What `snapshotter` saw, checking each metric is labelled with the name of a [`Wall`].
+fn seen_in(snapshotter: &Snapshotter) -> Seen {
+    let mut seen = Seen::default();
+    for (key, _, _, value) in snapshotter.snapshot().into_vec() {
+        let key = key.key();
+        let mut labels: BTreeMap<_, _> = key
+            .labels()
+            .map(|label| (label.key().to_owned(), label.value().to_owned()))
+            .collect();
+        check!(
+            labels.remove("job_name").as_deref() == Some("wall"),
+            "{key:?}"
+        );
+        match (key.name(), value) {
+            ("job_started_timestamp_seconds", DebugValue::Gauge(at)) => {
+                seen.started = Some(at.into_inner());
+            }
+            ("job_last_attempt_timestamp_seconds", DebugValue::Gauge(at)) => {
+                seen.last_attempt = Some(at.into_inner());
+            }
+            ("job_last_success_timestamp_seconds", DebugValue::Gauge(at)) => {
+                seen.last_success = Some(at.into_inner());
+            }
+            ("job_runs_total", DebugValue::Counter(count)) => {
+                let outcome = labels.remove("outcome").expect("a run has an outcome");
+                seen.runs.insert(outcome, count);
+            }
+            (name, value) => panic!("unexpected metric {name}: {value:?}"),
+        }
+        check!(labels.is_empty(), "{key:?}");
+    }
+    seen
+}
+
+/// Runs counted by outcome, as [`Seen`] holds them.
+fn runs(counts: &[(&str, u64)]) -> BTreeMap<String, u64> {
+    counts
+        .iter()
+        .map(|&(outcome, count)| (outcome.to_owned(), count))
+        .collect()
+}
+
+/// The metrics after runs ending in `outcomes`, the clock's time when the job started, and at the
+/// end of each run.
+async fn metrics_after(outcomes: &[Outcome]) -> (Seen, f64, Vec<f64>) {
     let recorder = DebuggingRecorder::new();
     let snapshotter = recorder.snapshotter();
     let _recording = metrics::set_default_local_recorder(&recorder);
@@ -533,36 +586,35 @@ async fn heartbeat_after(outcomes: &[Outcome]) -> (f64, f64, Vec<f64>) {
         .expect("it ends once its last run does");
 
     let ended_at = ended_at.lock().unwrap().clone();
-    (heartbeat(&snapshotter), started, ended_at)
-}
-
-/// The value of the only gauge `snapshotter` saw, checking it's the heartbeat of `wall`.
-fn heartbeat(snapshotter: &Snapshotter) -> f64 {
-    let gauges = snapshotter.snapshot().into_vec();
-    assert!(let [(key, _, _, DebugValue::Gauge(value))] = gauges.as_slice());
-    check!(key.key().name() == "job_last_success_timestamp_seconds");
-    let labels: Vec<_> = key
-        .key()
-        .labels()
-        .map(|label| (label.key(), label.value()))
-        .collect();
-    check!(labels == [("job_name", "wall")]);
-    value.into_inner()
+    (seen_in(&snapshotter), started, ended_at)
 }
 
 #[tokio::test(start_paused = true)]
-async fn the_heartbeat_starts_with_the_job_and_moves_on_each_success() {
-    let (beat, started, _) = heartbeat_after(&[Outcome::Fail, Outcome::Panic]).await;
+async fn the_metrics_mark_the_start_each_run_and_each_success() {
+    let (seen, started, ended_at) = metrics_after(&[Outcome::Fail, Outcome::Panic]).await;
     check!(
-        beat == started,
-        "a job failing from the start has its start"
+        seen == Seen {
+            started: Some(started),
+            last_attempt: Some(ended_at[1]),
+            last_success: None,
+            runs: runs(&[("failed", 1), ("panicked", 1)]),
+        },
+        "a job failing from the start has no success"
     );
 
-    let (beat, _, ended_at) = heartbeat_after(&[Outcome::Succeed, Outcome::Fail]).await;
-    check!(beat == ended_at[0], "a failed run leaves the last success");
+    let (seen, started, ended_at) = metrics_after(&[Outcome::Succeed, Outcome::Fail]).await;
+    check!(
+        seen == Seen {
+            started: Some(started),
+            last_attempt: Some(ended_at[1]),
+            last_success: Some(ended_at[0]),
+            runs: runs(&[("succeeded", 1), ("failed", 1)]),
+        },
+        "a failed run leaves the last success"
+    );
 
-    let (beat, _, ended_at) = heartbeat_after(&[Outcome::Fail, Outcome::Succeed]).await;
-    check!(beat == ended_at[1]);
+    let (seen, _, ended_at) = metrics_after(&[Outcome::Fail, Outcome::Succeed]).await;
+    check!(seen.last_success == Some(ended_at[1]));
 
     let recorder = DebuggingRecorder::new();
     let snapshotter = recorder.snapshotter();
@@ -580,14 +632,18 @@ async fn the_heartbeat_starts_with_the_job_and_moves_on_each_success() {
     );
     check!(run.now_or_never().is_none());
     check!(
-        heartbeat(&snapshotter) == clock.now().unix_seconds(),
-        "it starts before the first run"
+        seen_in(&snapshotter)
+            == Seen {
+                started: Some(clock.now().unix_seconds()),
+                ..Seen::default()
+            },
+        "it marks the start before the first run"
     );
 }
 
-/// The heartbeat a recorder installed once the job started gets from runs ending in `outcomes`,
-/// the clock's time when the job started, and at the end of each run.
-async fn heartbeat_installed_late(outcomes: &[Outcome]) -> (f64, f64, Vec<f64>) {
+/// The metrics a recorder installed once the job started gets from runs ending in `outcomes`, the
+/// clock's time when the job started, and at the end of each run.
+async fn metrics_installed_late(outcomes: &[Outcome]) -> (Seen, f64, Vec<f64>) {
     let clock = SimulatedClock::new();
     let started = clock.now().unix_seconds();
     let (wall, ended_at) = wall(outcomes, &clock);
@@ -611,14 +667,23 @@ async fn heartbeat_installed_late(outcomes: &[Outcome]) -> (f64, f64, Vec<f64>) 
         .expect("it ends once its last run does");
 
     let ended_at = ended_at.lock().unwrap().clone();
-    (heartbeat(&snapshotter), started, ended_at)
+    (seen_in(&snapshotter), started, ended_at)
 }
 
 #[tokio::test(start_paused = true)]
-async fn a_recorder_installed_after_the_job_started_gets_its_heartbeat() {
-    let (beat, _, ended_at) = heartbeat_installed_late(&[Outcome::Succeed]).await;
-    check!(beat == ended_at[0]);
+async fn a_recorder_installed_after_the_job_started_gets_its_start_and_last_success() {
+    let (seen, started, ended_at) = metrics_installed_late(&[Outcome::Succeed]).await;
+    check!(
+        seen == Seen {
+            started: Some(started),
+            last_attempt: Some(ended_at[0]),
+            last_success: Some(ended_at[0]),
+            runs: runs(&[("succeeded", 1)]),
+        }
+    );
 
-    let (beat, started, _) = heartbeat_installed_late(&[Outcome::Fail, Outcome::Fail]).await;
-    check!(beat == started, "while runs fail, it gets the start");
+    let (seen, started, ended_at) =
+        metrics_installed_late(&[Outcome::Succeed, Outcome::Fail]).await;
+    check!(seen.started == Some(started));
+    check!(seen.last_success == Some(ended_at[0]));
 }
