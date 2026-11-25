@@ -71,12 +71,14 @@ impl<P> Clone for LockClient<P> {
 impl<P: LockProvider> Lock for LockClient<P> {
     async fn try_lock(&self, key: &str, ttl: Duration) -> PortResult<TryLock> {
         if ttl.is_zero() {
-            let zero = anyhow!("{key} locked for 0 seconds");
-            return Err(Failure::new(FailureKind::Other, zero).into());
+            let zero = anyhow!("a lock's ttl must be more than 0");
+            let failure = Failure::new(FailureKind::Other, zero);
+            return Err(failure.context(format!("failed to lock {key}")).into());
         }
         if self.driver.is_closed() {
-            let stopped = anyhow!("{key} not locked, since the lock driver has stopped");
-            return Err(Failure::new(FailureKind::Unavailable, stopped).into());
+            let stopped = anyhow!("the lock driver has stopped");
+            let failure = Failure::new(FailureKind::Unavailable, stopped);
+            return Err(failure.context(format!("failed to lock {key}")).into());
         }
 
         let taken_at = Instant::now();
@@ -96,8 +98,9 @@ impl<P: LockProvider> Lock for LockClient<P> {
             // would extend the lease or let it go, so it would keep the key from everyone until
             // its ttl ends; let it go here instead.
             self.provider.unlock(&lease).await?;
-            let stopped = anyhow!("{key} let go, since the lock driver stopped as it was locked");
-            return Err(Failure::new(FailureKind::Unavailable, stopped).into());
+            let stopped = anyhow!("the lock driver has stopped");
+            let failure = Failure::new(FailureKind::Unavailable, stopped);
+            return Err(failure.context(format!("failed to lock {key}")).into());
         }
 
         Ok(TryLock::Locked(LockGuard {
@@ -132,8 +135,12 @@ impl<P: LockProvider> LockDriver<P> {
                 () = cancel.cancelled() => break,
                 message = self.messages.recv() => match message {
                     Some(message) => self.handle(message, &mut kept).await,
-                    // No client or guard is left to send any.
-                    None => return,
+                    // No client or guard is left to send any, so there is nothing to do until
+                    // cancelled; ending early would stop a service that runs it.
+                    None => {
+                        cancel.cancelled().await;
+                        break;
+                    }
                 },
                 () = sleep_until(due) => self.extend(&mut kept).await,
             }
@@ -193,24 +200,8 @@ impl<P: LockProvider> LockDriver<P> {
             return;
         }
 
-        match self.provider.extend(&due).await {
-            Ok(extended) => {
-                for (lease, extended) in due.iter().zip(extended) {
-                    match extended {
-                        Extended::Held => {
-                            if let Some(held) = kept.get_mut(&lease.token) {
-                                held.extended(now);
-                            }
-                        }
-                        Extended::Lost => {
-                            warn!(key = lease.key, "lost a lock taken by another");
-                            if let Some(held) = kept.remove(&lease.token) {
-                                held.lost.cancel();
-                            }
-                        }
-                    }
-                }
-            }
+        let extended = match self.provider.extend(&due).await {
+            Ok(extended) => extended,
             Err(error) => {
                 debug!(
                     error = &error as &dyn Error,
@@ -219,6 +210,22 @@ impl<P: LockProvider> LockDriver<P> {
                 for lease in &due {
                     if let Some(held) = kept.get_mut(&lease.token) {
                         held.next_extend = now + lease.ttl / RETRIES_PER_TTL;
+                    }
+                }
+                return;
+            }
+        };
+        for (lease, extended) in due.iter().zip(extended) {
+            match extended {
+                Extended::Held => {
+                    if let Some(held) = kept.get_mut(&lease.token) {
+                        held.extended(now);
+                    }
+                }
+                Extended::Lost => {
+                    if let Some(held) = kept.remove(&lease.token) {
+                        warn!(key = lease.key, "lost a lock taken by another");
+                        held.lost.cancel();
                     }
                 }
             }

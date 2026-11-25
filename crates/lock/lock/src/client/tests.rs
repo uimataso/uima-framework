@@ -223,3 +223,21 @@ async fn try_lock_fails_once_the_driver_has_stopped_or_been_dropped() {
     assert!(let Err(_) = client.try_lock("purge", TTL).await, "stopped");
     check!(!held(&store, "purge").await);
 }
+
+#[tokio::test(start_paused = true)]
+async fn the_driver_runs_until_cancelled_after_every_client_is_dropped() {
+    let (client, cancel, driving) = start(&Faulty::default());
+    drop(client);
+
+    tokio::time::sleep(GIVE_UP / 2).await;
+    check!(
+        !driving.is_finished(),
+        "so a service running it doesn't stop"
+    );
+
+    cancel.cancel();
+    tokio::time::timeout(GIVE_UP, driving)
+        .await
+        .unwrap()
+        .unwrap();
+}
