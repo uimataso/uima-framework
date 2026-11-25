@@ -9,16 +9,14 @@
 //!
 //! ```
 //! # async fn example(provider: impl uima_lock::LockProvider) -> anyhow::Result<()> {
-//! use std::time::Duration;
-//!
 //! use uima_cancel::CancelToken;
-//! use uima_lock::{Lock as _, TryLock};
+//! use uima_lock::{Lock as _, TryLock, Ttl};
 //!
 //! let (client, driver) = uima_lock::new(provider);
 //! let cancel = CancelToken::new();
 //! let driving = tokio::spawn(driver.run(cancel.clone()));
 //!
-//! if let TryLock::Locked(guard) = client.try_lock("purge", Duration::from_secs(30)).await? {
+//! if let TryLock::Locked(guard) = client.try_lock("purge", Ttl::from_secs(30)).await? {
 //!     // Work, stopping early once `guard.lost()` is cancelled.
 //!     guard.release().await?;
 //! }
@@ -37,10 +35,10 @@ mod client;
 mod provider;
 #[cfg(feature = "testing")]
 pub mod testing;
+mod ttl;
 
-pub use client::{
-    HasLock, Lock, LockClient, LockDriver, LockGuard, MAX_TTL, MIN_TTL, TryLock, new,
-};
+pub use client::{HasLock, Lock, LockClient, LockDriver, LockGuard, TryLock, new};
 #[cfg(feature = "testing")]
 pub use provider::contract;
 pub use provider::{Extended, Lease, LockProvider, TryAcquire};
+pub use ttl::{Ttl, TtlErrorKind};

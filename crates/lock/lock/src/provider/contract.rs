@@ -29,19 +29,6 @@ pub async fn run_all<P: LockProvider>(isolated: impl AsyncFn() -> P) {
     run_case(&isolated, unlock_of_a_lost_lease_leaves_the_new_holder).await;
 }
 
-/// A key no other case uses, so cases can share a store.
-fn key() -> String {
-    format!("contract-{}", Uuid::now_v7())
-}
-
-/// The lease `try_acquire` takes on `key` for `ttl`, failing when it is busy.
-async fn acquire(provider: &impl LockProvider, key: &str, ttl: Duration) -> anyhow::Result<Lease> {
-    match provider.try_acquire(key, ttl).await? {
-        TryAcquire::Acquired(lease) => Ok(lease),
-        TryAcquire::Busy => anyhow::bail!("{key} is busy"),
-    }
-}
-
 pub async fn acquire_takes_a_free_key(provider: &impl LockProvider) -> anyhow::Result<()> {
     let key = key();
     let lease = acquire(provider, &key, TTL).await?;
@@ -129,4 +116,17 @@ pub async fn unlock_of_a_lost_lease_leaves_the_new_holder(
     assert!(let Ok(()) = provider.unlock(&old).await);
     check!(provider.try_acquire(&key, TTL).await? == TryAcquire::Busy);
     Ok(())
+}
+
+/// A key no other case uses, so cases can share a store.
+fn key() -> String {
+    format!("contract-{}", Uuid::now_v7())
+}
+
+/// The lease `try_acquire` takes on `key` for `ttl`, failing when it is busy.
+async fn acquire(provider: &impl LockProvider, key: &str, ttl: Duration) -> anyhow::Result<Lease> {
+    match provider.try_acquire(key, ttl).await? {
+        TryAcquire::Acquired(lease) => Ok(lease),
+        TryAcquire::Busy => anyhow::bail!("{key} is busy"),
+    }
 }

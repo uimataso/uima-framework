@@ -16,19 +16,10 @@ use tracing::{debug, warn};
 use uima_cancel::CancelToken;
 use uima_core::{Failure, FailureKind, PortResult, Uuid};
 
-use crate::{Extended, Lease, LockProvider, TryAcquire};
+use crate::{Extended, Lease, LockProvider, TryAcquire, Ttl};
 
 #[cfg(all(test, feature = "testing"))]
 mod tests;
-
-/// The shortest `ttl` a lock is taken for, the smallest a store is sure to tell apart.
-pub const MIN_TTL: Duration = Duration::from_millis(1);
-
-/// The longest `ttl` a lock is taken for.
-pub const MAX_TTL: Duration = Duration::from_secs(365 * 24 * 60 * 60);
-
-/// How many times a lease is retried per `ttl` after a failed extend.
-const RETRIES_PER_TTL: u32 = 10;
 
 /// The port use cases take locks through.
 #[uima_port_macro::has_port]
@@ -36,13 +27,9 @@ pub trait Lock: Send + Sync {
     /// Takes the lock on `key` for `ttl` without waiting, kept alive until the guard is dropped
     /// or released.
     ///
-    /// Fails when `ttl` is outside [`MIN_TTL`]`..=`[`MAX_TTL`], when the store does, or once the
-    /// [`LockDriver`] has stopped or been dropped.
-    fn try_lock(
-        &self,
-        key: &str,
-        ttl: Duration,
-    ) -> impl Future<Output = PortResult<TryLock>> + Send;
+    /// Fails when the store does, or once the [`LockDriver`] has stopped or been dropped. One that
+    /// fails or is cancelled may leave the key held, with no guard, until `ttl` ends.
+    fn try_lock(&self, key: &str, ttl: Ttl) -> impl Future<Output = PortResult<TryLock>> + Send;
 }
 
 /// What [`Lock::try_lock`] got.
@@ -83,12 +70,7 @@ impl<P> Clone for LockClient<P> {
 }
 
 impl<P: LockProvider> Lock for LockClient<P> {
-    async fn try_lock(&self, key: &str, ttl: Duration) -> PortResult<TryLock> {
-        if !(MIN_TTL..=MAX_TTL).contains(&ttl) {
-            let out_of_range = anyhow!("a lock's ttl must be within {MIN_TTL:?}..={MAX_TTL:?}");
-            let failure = Failure::new(FailureKind::Other, out_of_range);
-            return Err(failure.context(format!("failed to lock {key}")).into());
-        }
+    async fn try_lock(&self, key: &str, ttl: Ttl) -> PortResult<TryLock> {
         if self.driver.is_closed() {
             let stopped = anyhow!("the lock driver has stopped");
             let failure = Failure::new(FailureKind::Unavailable, stopped);
@@ -96,7 +78,7 @@ impl<P: LockProvider> Lock for LockClient<P> {
         }
 
         let taken_at = Instant::now();
-        let lease = match self.provider.try_acquire(key, ttl).await? {
+        let lease = match self.provider.try_acquire(key, ttl.get()).await? {
             TryAcquire::Acquired(lease) => lease,
             TryAcquire::Busy => return Ok(TryLock::Busy),
         };
@@ -107,6 +89,10 @@ impl<P: LockProvider> Lock for LockClient<P> {
             lost: lost.clone(),
             taken_at,
         };
+        if Instant::now() >= deadline(taken_at, lease.ttl) {
+            // Taken too slowly to keep, so it may be expiring already.
+            lost.cancel();
+        }
         if self.driver.send(held).is_err() {
             // The driver stopped while the lease was being taken, after the check above. Nothing
             // would extend the lease or let it go, so it would keep the key from everyone until
@@ -140,10 +126,13 @@ impl<P: LockProvider> LockDriver<P> {
     /// Keeps the locks until `cancel`, then cancels every guard's [`lost`](LockGuard::lost), lets
     /// go of every lock still held, and ends.
     ///
-    /// It keeps the locks taken before it runs too, once it does. Once it ends however it ends,
-    /// even dropped or panicking, the guards' `lost` is cancelled and [`Lock::try_lock`] fails.
+    /// Locks taken before it starts are kept too. Once it has started, dropping it cancels the
+    /// guards' `lost` as well, but leaves their locks to expire. A driver dropped without
+    /// running cancels nothing.
     pub async fn run(mut self, cancel: CancelToken) {
         let mut kept = HashMap::new();
+        // Whether a client or guard is left to send messages.
+        let mut open = true;
         let mut extending: Option<Call<ExtendReply>> = None;
         let mut unlocking: FuturesUnordered<Call<UnlockReply>> = FuturesUnordered::new();
 
@@ -162,14 +151,11 @@ impl<P: LockProvider> LockDriver<P> {
             tokio::select! {
                 biased;
                 () = cancel.cancelled() => break,
-                message = self.messages.recv() => match message {
+                // With none left, it still lets go of the locks dropped last, and runs until
+                // cancelled, since ending early would stop a service that runs it.
+                message = self.messages.recv(), if open => match message {
                     Some(message) => self.handle(message, &mut kept, &unlocking),
-                    // No client or guard is left to send any, so there is nothing to do until
-                    // cancelled; ending early would stop a service that runs it.
-                    None => {
-                        cancel.cancelled().await;
-                        break;
-                    }
+                    None => open = false,
                 },
                 extended = poll(extending.as_mut()) => {
                     extending = None;
@@ -276,7 +262,14 @@ impl<P: LockProvider> LockDriver<P> {
     ) -> Call<UnlockReply> {
         let provider = self.provider.clone();
         Box::pin(async move {
-            let result = provider.unlock(&lease).await;
+            // After its ttl the lease has expired, so it is let go already.
+            let result = match tokio::time::timeout(lease.ttl, provider.unlock(&lease)).await {
+                Ok(result) => result,
+                Err(_) => {
+                    let late = anyhow!("no answer within the lease's ttl");
+                    Err(Failure::new(FailureKind::Timeout, late).into())
+                }
+            };
             if let Err(error) = &result {
                 warn!(
                     key = lease.key,
@@ -312,8 +305,8 @@ impl LockGuard {
 
     /// Lets the lock go, waiting until the store has.
     ///
-    /// A lock already lost is not an error, nor is one whose driver has stopped, which let go of
-    /// every lock as it did.
+    /// A lock already lost is not an error, nor is one whose driver has ended. A driver stopped by
+    /// its `cancel` let go of every lock as it did; one dropped left them to expire.
     pub async fn release(mut self) -> PortResult<()> {
         let Some(lease) = self.lease.take() else {
             return Ok(());
@@ -335,6 +328,25 @@ impl Drop for LockGuard {
     }
 }
 
+/// What a [`LockClient`] and its guards tell the [`LockDriver`].
+#[derive(Debug)]
+enum Message {
+    /// A lock was taken by a request sent at `taken_at`; keep it alive and cancel `lost` once it
+    /// is lost.
+    Held {
+        lease: Lease,
+        lost: CancelToken,
+        taken_at: Instant,
+    },
+    /// Let the lock go; answer through `done` once the store has.
+    Release {
+        lease: Lease,
+        done: oneshot::Sender<PortResult<()>>,
+    },
+    /// A guard was dropped; let the lock go.
+    Dropped { lease: Lease },
+}
+
 /// A lock the driver keeps.
 ///
 /// Dropping it cancels `lost`, so a lock is lost once the driver stops keeping it, however that
@@ -351,6 +363,8 @@ struct Kept {
 impl Kept {
     /// How many times a lease is extended per `ttl`.
     const EXTENDS_PER_TTL: u32 = 3;
+    /// How many times a lease is retried per `ttl` after a failed extend.
+    const RETRIES_PER_TTL: u32 = 10;
 
     fn new(lease: Lease, lost: CancelToken, taken_at: Instant) -> Self {
         let mut kept = Self {
@@ -367,7 +381,12 @@ impl Kept {
     fn extended(&mut self, sent: Instant) {
         let ttl = self.lease.ttl;
         self.next_extend = sent + ttl / Self::EXTENDS_PER_TTL;
-        self.deadline = sent + ttl * 4 / 5;
+        self.deadline = deadline(sent, ttl);
+    }
+
+    /// Schedules the next extend soon, after one failed.
+    fn retry_soon(&mut self) {
+        self.next_extend = Instant::now() + self.lease.ttl / Self::RETRIES_PER_TTL;
     }
 
     fn due(&self) -> Instant {
@@ -403,7 +422,7 @@ impl ExtendReply {
                 );
                 for lease in &self.leases {
                     if let Some(kept) = kept.get_mut(&lease.token) {
-                        kept.next_extend = Instant::now() + lease.ttl / RETRIES_PER_TTL;
+                        kept.retry_soon();
                     }
                 }
                 return;
@@ -456,21 +475,8 @@ async fn sleep_until(at: Option<Instant>) {
     }
 }
 
-/// What a [`LockClient`] and its guards tell the [`LockDriver`].
-#[derive(Debug)]
-enum Message {
-    /// A lock was taken by a request sent at `taken_at`; keep it alive and cancel `lost` once it
-    /// is lost.
-    Held {
-        lease: Lease,
-        lost: CancelToken,
-        taken_at: Instant,
-    },
-    /// Let the lock go; answer through `done` once the store has.
-    Release {
-        lease: Lease,
-        done: oneshot::Sender<PortResult<()>>,
-    },
-    /// A guard was dropped; let the lock go.
-    Dropped { lease: Lease },
+/// When a lease extended by a request sent at `sent` counts as lost unless extended again, a
+/// little before the store may expire it.
+fn deadline(sent: Instant, ttl: Duration) -> Instant {
+    sent + ttl * 4 / 5
 }

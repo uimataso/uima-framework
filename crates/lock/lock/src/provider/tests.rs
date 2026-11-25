@@ -1,0 +1,182 @@
+use std::collections::HashMap;
+use std::sync::Mutex;
+
+use uima_testing::check;
+
+use super::*;
+use crate::contract;
+use crate::testing::MemoryLockProvider;
+use Break::*;
+
+/// One way a [`Broken`] store gets locks wrong.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Break {
+    WrongTtl,
+    NeverBusy,
+    OneKey,
+    UnlockKeeps,
+    NeverExpires,
+    ExtendForgets,
+    ExtendRotated,
+    UnlockByKey,
+}
+
+/// A [`MemoryLockProvider`] broken as `breaks` says.
+#[derive(Default)]
+struct Broken {
+    store: MemoryLockProvider,
+    breaks: Option<Break>,
+    /// Each key's newest lease, for `UnlockByKey`.
+    newest: Mutex<HashMap<String, Lease>>,
+}
+
+impl Broken {
+    fn new(breaks: Break) -> Self {
+        Self {
+            breaks: Some(breaks),
+            ..Self::default()
+        }
+    }
+}
+
+impl LockProvider for Broken {
+    async fn try_acquire(&self, key: &str, ttl: Duration) -> PortResult<TryAcquire> {
+        let (store_key, store_ttl) = match self.breaks {
+            Some(OneKey) => ("one", ttl),
+            Some(NeverExpires) => (key, ttl * 1000),
+            _ => (key, ttl),
+        };
+        let got = self.store.try_acquire(store_key, store_ttl).await?;
+        let mut lease = match (got, self.breaks) {
+            (TryAcquire::Acquired(lease), _) => lease,
+            (TryAcquire::Busy, Some(NeverBusy)) => Lease {
+                key: key.to_owned(),
+                token: Uuid::now_v7(),
+                ttl,
+            },
+            (TryAcquire::Busy, _) => return Ok(TryAcquire::Busy),
+        };
+        lease.key = key.to_owned();
+        lease.ttl = if self.breaks == Some(WrongTtl) {
+            ttl * 2
+        } else {
+            ttl
+        };
+        self.newest
+            .lock()
+            .unwrap()
+            .insert(key.to_owned(), lease.clone());
+        Ok(TryAcquire::Acquired(lease))
+    }
+
+    async fn extend(&self, leases: &[Lease]) -> PortResult<Vec<Extended>> {
+        match self.breaks {
+            Some(ExtendForgets) => Ok(vec![Extended::Held; leases.len()]),
+            Some(ExtendRotated) => {
+                let mut extended = self.store.extend(leases).await?;
+                extended.rotate_left(1);
+                Ok(extended)
+            }
+            _ => self.store.extend(leases).await,
+        }
+    }
+
+    async fn unlock(&self, lease: &Lease) -> PortResult<()> {
+        match self.breaks {
+            Some(UnlockKeeps) => Ok(()),
+            Some(UnlockByKey) => {
+                let newest = self.newest.lock().unwrap().get(&lease.key).cloned();
+                self.store
+                    .unlock(&newest.unwrap_or_else(|| lease.clone()))
+                    .await
+            }
+            _ => self.store.unlock(lease).await,
+        }
+    }
+}
+
+/// Whether `case` fails on a store broken as `breaks` says.
+async fn fails<F>(breaks: Break, case: impl FnOnce(Broken) -> F) -> bool
+where
+    F: Future<Output = anyhow::Result<()>> + Send + 'static,
+{
+    tokio::spawn(case(Broken::new(breaks)))
+        .await
+        .map_or(true, |result| result.is_err())
+}
+
+#[tokio::test(start_paused = true)]
+async fn the_contract_fails_each_broken_store() {
+    for breaks in [
+        WrongTtl,
+        NeverBusy,
+        OneKey,
+        UnlockKeeps,
+        NeverExpires,
+        ExtendForgets,
+        ExtendRotated,
+        UnlockByKey,
+    ] {
+        let ran = tokio::spawn(contract::run_all(async move || Broken::new(breaks))).await;
+
+        check!(ran.is_err_and(|error| error.is_panic()), "{breaks:?}");
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn each_case_fails_the_store_breaking_it() {
+    check!(
+        fails(WrongTtl, |p| async move {
+            contract::acquire_takes_a_free_key(&p).await
+        })
+        .await
+    );
+    check!(
+        fails(NeverBusy, |p| async move {
+            contract::acquire_on_a_held_key_is_busy(&p).await
+        })
+        .await
+    );
+    check!(
+        fails(OneKey, |p| async move {
+            contract::keys_are_locked_apart(&p).await
+        })
+        .await
+    );
+    check!(
+        fails(UnlockKeeps, |p| async move {
+            contract::unlock_frees_the_key(&p).await
+        })
+        .await
+    );
+    check!(
+        fails(NeverExpires, |p| async move {
+            contract::an_expired_lease_can_be_taken(&p).await
+        })
+        .await
+    );
+    check!(
+        fails(ExtendForgets, |p| async move {
+            contract::extend_keeps_a_lease_past_its_ttl(&p).await
+        })
+        .await
+    );
+    check!(
+        fails(ExtendRotated, |p| async move {
+            contract::extend_tells_each_lease_in_order(&p).await
+        })
+        .await
+    );
+    check!(
+        fails(ExtendForgets, |p| async move {
+            contract::extend_after_unlock_is_lost(&p).await
+        })
+        .await
+    );
+    check!(
+        fails(UnlockByKey, |p| async move {
+            contract::unlock_of_a_lost_lease_leaves_the_new_holder(&p).await
+        })
+        .await
+    );
+}

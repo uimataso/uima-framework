@@ -7,6 +7,8 @@ use uima_core::{PortResult, Uuid};
 
 #[cfg(feature = "testing")]
 pub mod contract;
+#[cfg(all(test, feature = "testing"))]
+mod tests;
 
 /// The store locks are kept in, such as a database table.
 ///
