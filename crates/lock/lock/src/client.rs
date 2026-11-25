@@ -6,11 +6,12 @@ use std::future::Future;
 use std::sync::Arc;
 use std::time::Duration;
 
+use anyhow::anyhow;
 use tokio::sync::{mpsc, oneshot};
 use tokio::time::Instant;
 use tracing::{debug, warn};
 use uima_cancel::CancelToken;
-use uima_core::{Failure, FailureKind, PortError, PortResult, Uuid};
+use uima_core::{Failure, FailureKind, PortResult, Uuid};
 
 use crate::{Extended, Lease, LockProvider, TryAcquire};
 
@@ -70,13 +71,12 @@ impl<P> Clone for LockClient<P> {
 impl<P: LockProvider> Lock for LockClient<P> {
     async fn try_lock(&self, key: &str, ttl: Duration) -> PortResult<TryLock> {
         if ttl.is_zero() {
-            return Err(failure(
-                FailureKind::Other,
-                format!("{key} locked for 0 seconds"),
-            ));
+            let zero = anyhow!("{key} locked for 0 seconds");
+            return Err(Failure::new(FailureKind::Other, zero).into());
         }
         if self.driver.is_closed() {
-            return Err(driver_stopped());
+            let stopped = anyhow!("{key} not locked, since the lock driver has stopped");
+            return Err(Failure::new(FailureKind::Unavailable, stopped).into());
         }
 
         let taken_at = Instant::now();
@@ -84,6 +84,7 @@ impl<P: LockProvider> Lock for LockClient<P> {
             TryAcquire::Acquired(lease) => lease,
             TryAcquire::Busy => return Ok(TryLock::Busy),
         };
+
         let lost = CancelToken::new();
         let held = Message::Held {
             lease: lease.clone(),
@@ -91,9 +92,12 @@ impl<P: LockProvider> Lock for LockClient<P> {
             taken_at,
         };
         if self.driver.send(held).is_err() {
-            // Stopped since the check, so no one would keep the lease or let it go.
+            // The driver stopped while the lease was being taken, after the check above. Nothing
+            // would extend the lease or let it go, so it would keep the key from everyone until
+            // its ttl ends; let it go here instead.
             self.provider.unlock(&lease).await?;
-            return Err(driver_stopped());
+            let stopped = anyhow!("{key} let go, since the lock driver stopped as it was locked");
+            return Err(Failure::new(FailureKind::Unavailable, stopped).into());
         }
 
         Ok(TryLock::Locked(LockGuard {
@@ -278,17 +282,6 @@ async fn sleep_until(at: Option<Instant>) {
         Some(at) => tokio::time::sleep_until(at).await,
         None => std::future::pending().await,
     }
-}
-
-fn failure(kind: FailureKind, message: String) -> PortError<!> {
-    PortError::Failed(Failure::new(kind, anyhow::anyhow!(message)))
-}
-
-fn driver_stopped() -> PortError<!> {
-    failure(
-        FailureKind::Unavailable,
-        "the lock driver isn't running".to_owned(),
-    )
 }
 
 /// A held lock, kept alive by the [`LockDriver`] until it is released or dropped.
