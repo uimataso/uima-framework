@@ -1,12 +1,14 @@
 //! Test helpers.
 
 use std::sync::atomic::{AtomicU32, Ordering};
+use std::time::Duration;
 
 use sqlx::migrate::Migrator;
 use sqlx::{AssertSqlSafe, PgPool};
+use testcontainers::bollard::Docker;
 use testcontainers::bollard::errors::Error::DockerResponseServerError;
 use testcontainers::bollard::query_parameters::RemoveContainerOptionsBuilder;
-use testcontainers::bollard::{self, Docker};
+use testcontainers::core::client::docker_client_instance;
 use testcontainers::core::{Mount, WaitFor};
 use testcontainers::runners::AsyncRunner as _;
 use testcontainers::{ContainerAsync, ContainerRequest, GenericImage, ImageExt as _};
@@ -21,10 +23,19 @@ pub(crate) const PASSWORD: &str = "pg-test-password";
 /// The migrated database every case's database is copied from.
 const TEMPLATE: &str = "template_migrated";
 
+/// How long a container runs at most.
+const LIFETIME: Duration = Duration::from_secs(600);
+
+// Longer than the 5 × 60 s after which the CI profile in `.config/nextest.toml` kills a test.
+const _: () = assert!(LIFETIME.as_secs() > 300);
+
 /// A Postgres container for one test function, where each case takes a database of its own.
 ///
 /// The container keeps its data in memory without syncing it to disk, and the migrations run once
-/// into a template that every case's database is copied from.
+/// into a template that every case's database is copied from. It stops and is removed 10 minutes
+/// after it starts, so a test that runs longer loses its server, and a killed test's server doesn't
+/// keep running. A test killed between creating the container and starting it leaves one that never
+/// runs, which `docker container prune` removes.
 ///
 /// ```no_run
 /// # async fn run() {
@@ -54,7 +65,7 @@ impl TestPostgres {
     /// If the container doesn't start, its server can't be reached, or a migration fails.
     pub async fn start(migrator: &Migrator) -> Self {
         let name = container_name();
-        let container = start_container(image(&name), &name).await;
+        let container = start_container(image(&name, LIFETIME), &name).await;
         let url = server_url(&container).await;
         migrate_template(&url, migrator).await;
 
@@ -120,39 +131,66 @@ async fn start_container(
     match remove_container(name).await {
         Ok(()) => panic!("the postgres container starts: {error}"),
         Err(removing) => {
-            panic!("the postgres container starts: {error}; removing {name} failed: {removing}")
+            panic!("the postgres container starts: {error}; removing {name} failed: {removing:#}")
         }
     }
 }
 
-/// Removes the container named `name`, if there is one.
-async fn remove_container(name: &str) -> Result<(), bollard::errors::Error> {
+/// Removes the container named `name`, if there is one, waiting for a removal Docker already
+/// started.
+async fn remove_container(name: &str) -> anyhow::Result<()> {
     let options = RemoveContainerOptionsBuilder::new()
         .force(true)
         .v(true)
         .build();
-    let removed = Docker::connect_with_defaults()?
-        .remove_container(name, Some(options))
-        .await;
-    match removed {
-        Err(DockerResponseServerError {
+    // The client testcontainers starts containers with, so both find the same daemon.
+    let docker = docker_client_instance().await?;
+    match docker.remove_container(name, Some(options)).await {
+        Ok(())
+        | Err(DockerResponseServerError {
             status_code: 404, ..
         }) => Ok(()),
-        removed => removed,
+        // Docker is already removing it, for another caller or as an auto-removed container that
+        // stopped.
+        Err(DockerResponseServerError {
+            status_code: 409, ..
+        }) => wait_until_gone(&docker, name).await,
+        Err(error) => Err(error.into()),
     }
 }
 
+/// Waits for the container named `name` to be gone, for about 30 seconds.
+async fn wait_until_gone(docker: &Docker, name: &str) -> anyhow::Result<()> {
+    for _ in 0..300 {
+        match docker.inspect_container(name, None).await {
+            Err(DockerResponseServerError {
+                status_code: 404, ..
+            }) => return Ok(()),
+            Err(error) => return Err(error.into()),
+            Ok(_) => tokio::time::sleep(Duration::from_millis(100)).await,
+        }
+    }
+    anyhow::bail!("{name} is still being removed after about 30 seconds")
+}
+
 /// Postgres in memory named `name`, without syncing to disk, since a test's data needn't survive a
-/// crash.
-fn image(name: &str) -> ContainerRequest<GenericImage> {
+/// crash. The container stops after `lifetime` and Docker removes it then, so one whose test was
+/// killed before its drop removed it doesn't stay.
+fn image(name: &str, lifetime: Duration) -> ContainerRequest<GenericImage> {
+    let lifetime = lifetime.as_secs_f64().to_string();
     GenericImage::new("postgres", "17.9")
         .with_wait_for(WaitFor::message_on_stderr(
             "database system is ready to accept connections",
         ))
+        .with_entrypoint("timeout")
         .with_env_var("POSTGRES_PASSWORD", PASSWORD)
         .with_container_name(name)
         .with_mount(Mount::tmpfs_mount("/var/lib/postgresql/data"))
+        .with_host_config_modifier(|config| config.auto_remove = Some(true))
         .with_cmd([
+            "--signal=KILL",
+            &lifetime,
+            "docker-entrypoint.sh",
             "postgres",
             "-c",
             "fsync=off",
@@ -239,8 +277,6 @@ pub(crate) async fn test_migrator() -> Migrator {
 
 #[cfg(test)]
 mod tests {
-    use std::time::Duration;
-
     use uima_testing::check;
 
     use super::*;
@@ -323,14 +359,82 @@ mod tests {
     #[tokio::test]
     async fn a_container_that_doesnt_start_is_removed() {
         let name = container_name();
-        let request = image(&name).with_startup_timeout(Duration::from_millis(1));
+        let request = image(&name, LIFETIME).with_startup_timeout(Duration::from_millis(1));
 
         let starting = name.clone();
         let started = tokio::spawn(async move { start_container(request, &starting).await });
         check!(started.await.unwrap_err().is_panic());
 
-        let docker = Docker::connect_with_defaults().unwrap();
+        let docker = docker_client_instance().await.unwrap();
         let found = docker.inspect_container(&name, None).await;
+        check!(let Err(DockerResponseServerError { status_code: 404, .. }) = found);
+    }
+
+    #[tokio::test]
+    async fn a_container_nothing_removes_removes_itself_after_its_lifetime() {
+        let name = container_name();
+        let container = start_container(image(&name, Duration::from_secs(20)), &name).await;
+        let url = server_url(&container).await;
+        // As when the test's process is killed, no drop removes it.
+        std::mem::forget(container);
+        // A session still open, as a killed test's would be, keeps a server that's only asked to
+        // stop running.
+        let client = PostgresClient::connect(&target(&url, "postgres"), &PostgresConfig::default())
+            .await
+            .unwrap();
+        let _session = client.pool().acquire().await.unwrap();
+
+        let docker = docker_client_instance().await.unwrap();
+        let mut found = docker.inspect_container(&name, None).await;
+        for _ in 0..80 {
+            if found.is_err() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_secs(1)).await;
+            found = docker.inspect_container(&name, None).await;
+        }
+        remove_container(&name).await.unwrap();
+        check!(let Err(DockerResponseServerError { status_code: 404, .. }) = found);
+    }
+
+    #[tokio::test]
+    async fn a_container_two_callers_remove_at_once_is_removed_for_both() {
+        let name = container_name();
+        let container = start_container(image(&name, LIFETIME), &name).await;
+        std::mem::forget(container);
+        let docker = docker_client_instance().await.unwrap();
+        // Each caller looks right after its own removal returns, before the other's ends.
+        let remove = || async {
+            let removed = remove_container(&name).await;
+            (removed, docker.inspect_container(&name, None).await)
+        };
+
+        let ((first, first_found), (second, second_found)) = tokio::join!(remove(), remove());
+
+        check!(first.is_ok());
+        check!(second.is_ok());
+        check!(let Err(DockerResponseServerError { status_code: 404, .. }) = first_found);
+        check!(let Err(DockerResponseServerError { status_code: 404, .. }) = second_found);
+    }
+
+    #[tokio::test]
+    async fn a_lifetime_under_a_second_still_ends() {
+        let name = container_name();
+        // The server may stop before it's ready, failing the start.
+        if let Ok(container) = image(&name, Duration::from_millis(500)).start().await {
+            std::mem::forget(container);
+        }
+
+        let docker = docker_client_instance().await.unwrap();
+        let mut found = docker.inspect_container(&name, None).await;
+        for _ in 0..30 {
+            if found.is_err() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_secs(1)).await;
+            found = docker.inspect_container(&name, None).await;
+        }
+        remove_container(&name).await.unwrap();
         check!(let Err(DockerResponseServerError { status_code: 404, .. }) = found);
     }
 
