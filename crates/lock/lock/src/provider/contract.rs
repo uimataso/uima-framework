@@ -24,6 +24,7 @@ pub async fn run_all<P: LockProvider>(isolated: impl AsyncFn() -> P) {
     run_case(&isolated, unlock_frees_the_key).await;
     run_case(&isolated, an_expired_lease_can_be_taken).await;
     run_case(&isolated, extend_keeps_a_lease_past_its_ttl).await;
+    run_case(&isolated, extend_keeps_each_lease_for_its_own_ttl).await;
     run_case(&isolated, extend_tells_each_lease_in_order).await;
     run_case(&isolated, extend_after_unlock_is_lost).await;
     run_case(&isolated, unlock_of_a_lost_lease_leaves_the_new_holder).await;
@@ -79,6 +80,20 @@ pub async fn extend_keeps_a_lease_past_its_ttl(provider: &impl LockProvider) -> 
         tokio::time::sleep(TTL.get() / 2).await;
         check!(provider.extend(std::slice::from_ref(&lease)).await? == [Extended::Held]);
     }
+
+    check!(provider.try_acquire(&key, TTL).await? == TryAcquire::Busy);
+    Ok(())
+}
+
+pub async fn extend_keeps_each_lease_for_its_own_ttl(
+    provider: &impl LockProvider,
+) -> anyhow::Result<()> {
+    let key = key();
+    let lease = acquire(provider, &key, Ttl::from_secs(2)).await?;
+    tokio::time::sleep(EXPIRED).await;
+    check!(provider.extend(std::slice::from_ref(&lease)).await? == [Extended::Held]);
+    // Past when it was first taken until, but not past its ttl from the extend.
+    tokio::time::sleep(EXPIRED).await;
 
     check!(provider.try_acquire(&key, TTL).await? == TryAcquire::Busy);
     Ok(())

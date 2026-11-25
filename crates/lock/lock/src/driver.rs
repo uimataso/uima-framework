@@ -3,14 +3,12 @@
 use std::collections::HashMap;
 use std::error::Error;
 use std::future::Future;
-use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::anyhow;
-use futures_util::StreamExt as _;
-use futures_util::stream::FuturesUnordered;
 use tokio::sync::{mpsc, oneshot};
+use tokio::task::{JoinError, JoinSet};
 use tokio::time::Instant;
 use tracing::{debug, warn};
 use uima_cancel::CancelToken;
@@ -29,11 +27,22 @@ use crate::{Extended, Lease, LockProvider};
 pub struct LockDriver<P> {
     provider: Arc<P>,
     messages: mpsc::UnboundedReceiver<Message>,
+    /// Kept so `messages` stays open with every client and guard gone, since the driver still
+    /// runs until cancelled, as ending early would stop a service that runs it.
+    _open: mpsc::UnboundedSender<Message>,
 }
 
 impl<P: LockProvider> LockDriver<P> {
-    pub(crate) fn new(provider: Arc<P>, messages: mpsc::UnboundedReceiver<Message>) -> Self {
-        Self { provider, messages }
+    pub(crate) fn new(
+        provider: Arc<P>,
+        messages: mpsc::UnboundedReceiver<Message>,
+        open: mpsc::UnboundedSender<Message>,
+    ) -> Self {
+        Self {
+            provider,
+            messages,
+            _open: open,
+        }
     }
 
     /// Keeps the locks until `cancel`, then cancels every guard's
@@ -44,22 +53,16 @@ impl<P: LockProvider> LockDriver<P> {
     /// running cancels nothing.
     pub async fn run(mut self, cancel: CancelToken) {
         let mut driving = Driving::new(self.provider);
-        // Whether a client or guard is left to send messages.
-        let mut open = true;
 
         loop {
             let due = driving.due();
             tokio::select! {
+                // Cancel first, so the driver stops however busy it is.
                 biased;
                 () = cancel.cancelled() => break,
-                // With none left, it still lets go of the locks dropped last, and runs until
-                // cancelled, since ending early would stop a service that runs it.
-                message = self.messages.recv(), if open => match message {
-                    Some(message) => driving.handle(message),
-                    None => open = false,
-                },
-                reply = poll(driving.extending.as_mut()) => driving.extended(reply),
-                Some(reply) = driving.unlocking.next() => reply.answer(),
+                Some(message) = self.messages.recv() => driving.handle(message),
+                Some(reply) = driving.extending.join_next() => driving.extended(joined(reply)),
+                Some(reply) = driving.unlocking.join_next() => joined(reply).answer(),
                 () = sleep_until(due) => {
                     let now = Instant::now();
                     driving.give_up_late(now);
@@ -69,15 +72,15 @@ impl<P: LockProvider> LockDriver<P> {
         }
 
         // Closed first, so a lock taken from now on is let go by its taker. Every lost is
-        // cancelled before any unlock is waited on, and an extend still out is dropped.
+        // cancelled before any unlock is waited on, and the extends still out are dropped.
         self.messages.close();
-        driving.extending = None;
+        driving.extending.abort_all();
         while let Ok(message) = self.messages.try_recv() {
             driving.handle(message);
         }
         driving.let_all_go();
-        while let Some(reply) = driving.unlocking.next().await {
-            reply.answer();
+        while let Some(reply) = driving.unlocking.join_next().await {
+            joined(reply).answer();
         }
     }
 }
@@ -86,9 +89,8 @@ impl<P: LockProvider> LockDriver<P> {
 struct Driving<P> {
     provider: Arc<P>,
     kept: HashMap<Uuid, Kept>,
-    /// The one extend out, if any.
-    extending: Option<Call<ExtendReply>>,
-    unlocking: FuturesUnordered<Call<UnlockReply>>,
+    extending: JoinSet<ExtendReply>,
+    unlocking: JoinSet<UnlockReply>,
 }
 
 impl<P: LockProvider> Driving<P> {
@@ -96,24 +98,14 @@ impl<P: LockProvider> Driving<P> {
         Self {
             provider,
             kept: HashMap::new(),
-            extending: None,
-            unlocking: FuturesUnordered::new(),
+            extending: JoinSet::new(),
+            unlocking: JoinSet::new(),
         }
     }
 
-    /// When something is next due, if anything is. While an extend is out, only the deadlines
-    /// are.
+    /// When something is next due, if anything is.
     fn due(&self) -> Option<Instant> {
-        self.kept
-            .values()
-            .map(|kept| {
-                if self.extending.is_some() {
-                    kept.deadline
-                } else {
-                    kept.due()
-                }
-            })
-            .min()
+        self.kept.values().map(Kept::due).min()
     }
 
     fn handle(&mut self, message: Message) {
@@ -154,35 +146,44 @@ impl<P: LockProvider> Driving<P> {
         }
     }
 
-    /// Sends one extend of the leases due, unless one is out already.
+    /// Sends one extend of the leases due and not being extended already.
     fn extend_due(&mut self, now: Instant) {
-        if self.extending.is_some() {
-            return;
-        }
         let due: Vec<Lease> = self
             .kept
-            .values()
-            .filter(|kept| kept.next_extend <= now)
-            .map(|kept| kept.lease.clone())
+            .values_mut()
+            .filter(|kept| !kept.extending && kept.next_extend <= now)
+            .map(|kept| {
+                kept.extending = true;
+                kept.lease.clone()
+            })
             .collect();
-        if due.is_empty() {
+        // Waited for only so long that the shortest lease can still be retried in time.
+        let Some(wait) = due
+            .iter()
+            .map(|lease| lease.ttl.get() / Kept::WAITS_PER_TTL)
+            .min()
+        else {
             return;
-        }
+        };
 
         let provider = self.provider.clone();
-        self.extending = Some(Box::pin(async move {
-            let result = provider.extend(&due).await;
+        self.extending.spawn(async move {
+            let result = within(wait, provider.extend(&due)).await;
             ExtendReply {
                 sent: now,
                 leases: due,
                 result,
             }
-        }));
+        });
     }
 
     /// Updates the leases still kept from what an extend got, dropping those the store lost.
     fn extended(&mut self, reply: ExtendReply) {
-        self.extending = None;
+        for lease in &reply.leases {
+            if let Some(kept) = self.kept.get_mut(&lease.token) {
+                kept.extending = false;
+            }
+        }
         let extended = match reply.result {
             Ok(extended) => extended,
             Err(error) => {
@@ -218,13 +219,13 @@ impl<P: LockProvider> Driving<P> {
     fn let_all_go(&mut self) {
         for (_, kept) in self.kept.drain() {
             self.unlocking
-                .push(unlock(self.provider.clone(), kept.lease.clone(), None));
+                .spawn(unlock(self.provider.clone(), kept.lease.clone(), None));
         }
     }
 
     fn unlock(&mut self, lease: Lease, done: Option<oneshot::Sender<PortResult<()>>>) {
         self.unlocking
-            .push(unlock(self.provider.clone(), lease, done));
+            .spawn(unlock(self.provider.clone(), lease, done));
     }
 }
 
@@ -232,13 +233,15 @@ impl<P: LockProvider> Driving<P> {
 ///
 /// Dropping it cancels `lost`, so a lock is lost once the driver stops keeping it, however that
 /// happens.
-struct Kept {
+pub(crate) struct Kept {
     lease: Lease,
     lost: CancelToken,
     next_extend: Instant,
     /// When it counts as lost unless extended, a little before the store may expire it, from
     /// when the last request that held it was sent.
     deadline: Instant,
+    /// Whether an extend of it is out.
+    extending: bool,
 }
 
 impl Kept {
@@ -246,6 +249,15 @@ impl Kept {
     const EXTENDS_PER_TTL: u32 = 3;
     /// How many times a lease is retried per `ttl` after a failed extend.
     const RETRIES_PER_TTL: u32 = 10;
+    /// How many times an extend can be waited out per `ttl`, so one retried after it still is
+    /// before the deadline.
+    const WAITS_PER_TTL: u32 = 6;
+
+    /// When a lease held by a request sent at `sent` counts as lost unless extended again, a
+    /// little before the store may expire it.
+    pub(crate) fn deadline_after(sent: Instant, ttl: Duration) -> Instant {
+        sent + ttl * 4 / 5
+    }
 
     fn new(lease: Lease, lost: CancelToken, taken_at: Instant) -> Self {
         let mut kept = Self {
@@ -253,6 +265,7 @@ impl Kept {
             lost,
             next_extend: taken_at,
             deadline: taken_at,
+            extending: false,
         };
         kept.extended(taken_at);
         kept
@@ -262,7 +275,7 @@ impl Kept {
     fn extended(&mut self, sent: Instant) {
         let ttl = self.lease.ttl.get();
         self.next_extend = sent + ttl / Self::EXTENDS_PER_TTL;
-        self.deadline = deadline(sent, ttl);
+        self.deadline = Self::deadline_after(sent, ttl);
     }
 
     /// Schedules the next extend soon, after one failed.
@@ -270,8 +283,14 @@ impl Kept {
         self.next_extend = Instant::now() + self.lease.ttl.get() / Self::RETRIES_PER_TTL;
     }
 
+    /// When it is next due: to be extended, or given up on. While it is being extended, only
+    /// the latter.
     fn due(&self) -> Instant {
-        self.next_extend.min(self.deadline)
+        if self.extending {
+            self.deadline
+        } else {
+            self.next_extend.min(self.deadline)
+        }
     }
 }
 
@@ -280,9 +299,6 @@ impl Drop for Kept {
         self.lost.cancel();
     }
 }
-
-/// A store call the driver has sent, which it polls alongside its other work.
-type Call<T> = Pin<Box<dyn Future<Output = T> + Send>>;
 
 /// What an extend sent at `sent` got for `leases`.
 struct ExtendReply {
@@ -307,35 +323,35 @@ impl UnlockReply {
 }
 
 /// Lets `lease` go, giving up after its ttl, when it has expired anyway.
-fn unlock<P: LockProvider>(
+async fn unlock<P: LockProvider>(
     provider: Arc<P>,
     lease: Lease,
     done: Option<oneshot::Sender<PortResult<()>>>,
-) -> Call<UnlockReply> {
-    Box::pin(async move {
-        let result = match tokio::time::timeout(lease.ttl.get(), provider.unlock(&lease)).await {
-            Ok(result) => result,
-            Err(_) => {
-                let late = anyhow!("no answer within the lease's ttl");
-                Err(Failure::new(FailureKind::Timeout, late).into())
-            }
-        };
-        if let Err(error) = &result {
-            warn!(
-                key = lease.key,
-                error = error as &dyn Error,
-                "failed to let a lock go"
-            );
-        }
-        UnlockReply { result, done }
-    })
+) -> UnlockReply {
+    let result = within(lease.ttl.get(), provider.unlock(&lease)).await;
+    if let Err(error) = &result {
+        warn!(
+            key = lease.key,
+            error = error as &dyn Error,
+            "failed to let a lock go"
+        );
+    }
+    UnlockReply { result, done }
 }
 
-/// Waits for `call`, or forever without one.
-async fn poll<T>(call: Option<&mut Call<T>>) -> T {
-    match call {
-        Some(call) => call.await,
-        None => std::future::pending().await,
+/// What a store call's task gave, passing its panic on.
+fn joined<T>(joined: Result<T, JoinError>) -> T {
+    joined.unwrap_or_else(|error| std::panic::resume_unwind(error.into_panic()))
+}
+
+/// What `call` gives, or a timeout failure once `wait` has passed.
+async fn within<T>(wait: Duration, call: impl Future<Output = PortResult<T>>) -> PortResult<T> {
+    match tokio::time::timeout(wait, call).await {
+        Ok(result) => result,
+        Err(_) => {
+            let late = anyhow!("no answer within {wait:?}");
+            Err(Failure::new(FailureKind::Timeout, late).into())
+        }
     }
 }
 
@@ -345,10 +361,4 @@ async fn sleep_until(at: Option<Instant>) {
         Some(at) => tokio::time::sleep_until(at).await,
         None => std::future::pending().await,
     }
-}
-
-/// When a lease extended by a request sent at `sent` counts as lost unless extended again, a
-/// little before the store may expire it.
-pub(crate) fn deadline(sent: Instant, ttl: Duration) -> Instant {
-    sent + ttl * 4 / 5
 }

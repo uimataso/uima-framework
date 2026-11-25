@@ -29,6 +29,8 @@ impl Ttl {
     /// A year, so a lease's expiry can't overflow.
     pub const MAX: Self = Self(Duration::from_secs(365 * 24 * 60 * 60));
 
+    /// A ttl of `ttl`.
+    ///
     /// Fails outside [`MIN`](Self::MIN)`..=`[`MAX`](Self::MAX).
     pub const fn new(ttl: Duration) -> Result<Self, Invalid<Self>> {
         let nanos = ttl.as_nanos();
@@ -41,7 +43,12 @@ impl Ttl {
     /// `secs` seconds.
     ///
     /// Panics outside [`MIN`](Self::MIN)`..=`[`MAX`](Self::MAX), so a constant out of range
-    /// doesn't compile.
+    /// doesn't compile:
+    ///
+    /// ```compile_fail
+    /// const TTL: uima_lock::Ttl = uima_lock::Ttl::from_secs(0);
+    /// # let _ = TTL;
+    /// ```
     pub const fn from_secs(secs: u64) -> Self {
         match Self::new(Duration::from_secs(secs)) {
             Ok(ttl) => ttl,
@@ -49,6 +56,7 @@ impl Ttl {
         }
     }
 
+    /// The length itself.
     pub const fn get(self) -> Duration {
         self.0
     }

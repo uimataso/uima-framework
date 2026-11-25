@@ -17,8 +17,7 @@ uima-port-macro = { workspace = true }
 
 # workspace dependencies
 anyhow = { workspace = true }
-futures-util = { workspace = true, features = ["std"] }
-tokio = { workspace = true, features = ["macros", "sync", "time"] }
+tokio = { workspace = true, features = ["macros", "rt", "sync", "time"] }
 tracing = { workspace = true }
 
 # testing-only, behind the `testing` feature

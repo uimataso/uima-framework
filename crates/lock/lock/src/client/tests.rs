@@ -9,8 +9,7 @@ use super::*;
 use crate::testing::MemoryLockProvider;
 use crate::{Extended, TryAcquire};
 
-const LEASE: Ttl = Ttl::from_secs(3);
-const TTL: Duration = LEASE.get();
+const TTL: Ttl = Ttl::from_secs(3);
 
 /// Longer than any test waits, so one that never sees its event fails instead of hanging.
 const GIVE_UP: Duration = Duration::from_secs(3600);
@@ -37,6 +36,7 @@ struct Faulty {
     unlocks_take: Arc<Mutex<Duration>>,
     /// When the last extend that held its leases was sent.
     last_extended: Arc<Mutex<Option<Instant>>>,
+    acquire_fails: Arc<AtomicBool>,
     unlock_fails: Arc<AtomicBool>,
     /// Cancelled as a lock is taken, to stop the driver then.
     on_acquire: Arc<Mutex<Option<CancelToken>>>,
@@ -59,7 +59,11 @@ impl Faulty {
 
 impl LockProvider for Faulty {
     async fn try_acquire(&self, key: &str, ttl: Ttl) -> PortResult<TryAcquire> {
-        let acquired = self.store.try_acquire(key, ttl).await;
+        let acquired = if self.acquire_fails.load(Ordering::SeqCst) {
+            Err(down())
+        } else {
+            self.store.try_acquire(key, ttl).await
+        };
         let stop = self.on_acquire.lock().unwrap().take();
         if let Some(stop) = stop {
             stop.cancel();
@@ -111,7 +115,7 @@ fn start(store: &Faulty) -> (LockClient<Faulty>, CancelToken, JoinHandle<()>) {
 
 /// The guard `try_lock` gives on `key`, failing when it is busy.
 async fn lock(client: &impl Lock, key: &str) -> LockGuard {
-    match client.try_lock(key, LEASE).await {
+    match client.try_lock(key, TTL).await {
         Ok(TryLock::Locked(guard)) => guard,
         other => panic!("{key} not locked: {other:?}"),
     }
@@ -119,7 +123,7 @@ async fn lock(client: &impl Lock, key: &str) -> LockGuard {
 
 /// Whether the store holds `key`, asked without the client.
 async fn held(store: &Faulty, key: &str) -> bool {
-    match store.store.try_acquire(key, LEASE).await.unwrap() {
+    match store.store.try_acquire(key, TTL).await.unwrap() {
         TryAcquire::Busy => true,
         TryAcquire::Acquired(lease) => {
             store.store.unlock(&lease).await.unwrap();
@@ -140,7 +144,7 @@ async fn try_lock_takes_a_free_key_and_finds_a_held_one_busy() {
 
     let _guard = lock(&client, "purge").await;
 
-    assert!(let Ok(TryLock::Busy) = client.try_lock("purge", LEASE).await);
+    assert!(let Ok(TryLock::Busy) = client.try_lock("purge", TTL).await);
     let _other = lock(&client, "other").await;
 }
 
@@ -150,7 +154,7 @@ async fn a_held_lock_is_kept_past_its_ttl() {
     let (client, _cancel, _driving) = start(&store);
     let guard = lock(&client, "purge").await;
 
-    tokio::time::sleep(TTL * 10).await;
+    tokio::time::sleep(TTL.get() * 10).await;
 
     check!(held(&store, "purge").await);
     check!(!guard.lost().is_cancelled());
@@ -190,7 +194,7 @@ async fn a_lock_the_store_says_is_lost_cancels_lost() {
     let guard = lock(&client, "purge").await;
     store.extend_and(Extending::LosesThem);
 
-    let lost = tokio::time::timeout(TTL, guard.lost().cancelled()).await;
+    let lost = tokio::time::timeout(TTL.get(), guard.lost().cancelled()).await;
 
     check!(lost.is_ok(), "before its ttl ends");
 }
@@ -202,7 +206,7 @@ async fn a_lock_that_fails_to_extend_is_lost_before_its_ttl_ends() {
     let guard = lock(&client, "purge").await;
     store.extend_and(Extending::Fails);
 
-    let lost = tokio::time::timeout(TTL, guard.lost().cancelled()).await;
+    let lost = tokio::time::timeout(TTL.get(), guard.lost().cancelled()).await;
 
     check!(
         lost.is_ok(),
@@ -237,7 +241,7 @@ async fn a_lock_taken_before_the_driver_runs_is_kept_once_it_does() {
     let guard = lock(&client, "purge").await;
 
     let _driving = tokio::spawn(driver.run(CancelToken::new()));
-    tokio::time::sleep(TTL * 10).await;
+    tokio::time::sleep(TTL.get() * 10).await;
 
     check!(held(&store, "purge").await);
     check!(!guard.lost().is_cancelled());
@@ -248,7 +252,7 @@ async fn try_lock_fails_once_the_driver_has_stopped_or_been_dropped() {
     let store = Faulty::default();
     let (client, driver) = new(store.clone());
     drop(driver);
-    assert!(let Err(_) = client.try_lock("purge", LEASE).await, "dropped");
+    assert!(let Err(_) = client.try_lock("purge", TTL).await, "dropped");
     check!(!held(&store, "purge").await, "and it takes no lock");
 
     let (client, driver) = new(store.clone());
@@ -257,7 +261,7 @@ async fn try_lock_fails_once_the_driver_has_stopped_or_been_dropped() {
     tokio::time::timeout(GIVE_UP, driver.run(cancel))
         .await
         .unwrap();
-    assert!(let Err(_) = client.try_lock("purge", LEASE).await, "stopped");
+    assert!(let Err(_) = client.try_lock("purge", TTL).await, "stopped");
     check!(!held(&store, "purge").await);
 }
 
@@ -286,9 +290,9 @@ async fn a_lock_whose_extend_failed_once_is_kept() {
     let guard = lock(&client, "purge").await;
 
     store.extend_and(Extending::Fails);
-    tokio::time::sleep(TTL / 2).await;
+    tokio::time::sleep(TTL.get() / 2).await;
     store.extend_and(Extending::Works);
-    tokio::time::sleep(TTL * 10).await;
+    tokio::time::sleep(TTL.get() * 10).await;
 
     check!(held(&store, "purge").await);
     check!(!guard.lost().is_cancelled());
@@ -301,7 +305,7 @@ async fn a_lock_whose_extend_hangs_is_lost_before_its_ttl_ends() {
     let guard = lock(&client, "purge").await;
 
     store.reply_in(GIVE_UP);
-    let lost = tokio::time::timeout(TTL, guard.lost().cancelled()).await;
+    let lost = tokio::time::timeout(TTL.get(), guard.lost().cancelled()).await;
 
     check!(lost.is_ok());
 }
@@ -310,12 +314,12 @@ async fn a_lock_whose_extend_hangs_is_lost_before_its_ttl_ends() {
 async fn a_lock_is_lost_by_its_ttl_from_when_it_was_asked_for() {
     let store = Faulty::default();
     let (client, _cancel, _driving) = start(&store);
-    store.reply_in(TTL / 2);
+    store.reply_in(TTL.get() / 2);
     let guard = lock(&client, "purge").await;
     store.reply_in(Duration::ZERO);
 
     store.extend_and(Extending::Fails);
-    let lost = tokio::time::timeout(TTL / 2, guard.lost().cancelled()).await;
+    let lost = tokio::time::timeout(TTL.get() / 2, guard.lost().cancelled()).await;
 
     check!(
         lost.is_ok(),
@@ -332,7 +336,7 @@ async fn a_slow_unlock_doesnt_hold_up_extending_the_other_locks() {
 
     *store.unlocks_take.lock().unwrap() = GIVE_UP;
     drop(dropped);
-    tokio::time::sleep(TTL * 2).await;
+    tokio::time::sleep(TTL.get() * 2).await;
 
     check!(held(&store, "report").await);
     check!(!kept.lost().is_cancelled());
@@ -357,7 +361,7 @@ async fn a_lock_taken_as_the_driver_stops_is_let_go() {
     // The reply waits for the driver to stop.
     store.reply_in(Duration::from_millis(1));
 
-    assert!(let Err(_) = client.try_lock("purge", LEASE).await);
+    assert!(let Err(_) = client.try_lock("purge", TTL).await);
     tokio::time::timeout(GIVE_UP, driving)
         .await
         .unwrap()
@@ -379,7 +383,7 @@ async fn stopping_with_a_slow_store_cancels_every_lost_at_once() {
 
     check!(first.lost().is_cancelled());
     check!(second.lost().is_cancelled());
-    let ended = tokio::time::timeout(TTL * 2, driving).await;
+    let ended = tokio::time::timeout(TTL.get() * 2, driving).await;
     check!(
         ended.is_ok(),
         "since an unlock after its lease's ttl would do nothing"
@@ -407,8 +411,8 @@ async fn a_lock_extended_slowly_is_lost_by_its_ttl_from_when_the_extend_was_sent
     let store = Faulty::default();
     let (client, _cancel, _driving) = start(&store);
     let guard = lock(&client, "purge").await;
-    *store.extends_take.lock().unwrap() = TTL / 4;
-    tokio::time::sleep(TTL).await;
+    *store.extends_take.lock().unwrap() = TTL.get() / 4;
+    tokio::time::sleep(TTL.get()).await;
 
     store.extend_and(Extending::Fails);
     tokio::time::timeout(GIVE_UP, guard.lost().cancelled())
@@ -417,7 +421,7 @@ async fn a_lock_extended_slowly_is_lost_by_its_ttl_from_when_the_extend_was_sent
 
     let extended = store.last_extended.lock().unwrap().unwrap();
     check!(
-        Instant::now() < extended + TTL,
+        Instant::now() < extended + TTL.get(),
         "before the store lets another take it"
     );
 }
@@ -429,7 +433,7 @@ async fn a_lock_given_up_is_let_go_before_its_ttl_ends() {
     let guard = lock(&client, "purge").await;
 
     *store.extends_take.lock().unwrap() = GIVE_UP;
-    tokio::time::timeout(TTL, guard.lost().cancelled())
+    tokio::time::timeout(TTL.get(), guard.lost().cancelled())
         .await
         .unwrap();
     settle().await;
@@ -441,7 +445,7 @@ async fn a_lock_given_up_is_let_go_before_its_ttl_ends() {
 async fn a_lock_taken_too_slowly_to_keep_is_lost_as_it_is_given() {
     let store = Faulty::default();
     let (client, _cancel, _driving) = start(&store);
-    store.reply_in(TTL);
+    store.reply_in(TTL.get());
 
     let guard = lock(&client, "purge").await;
 
@@ -471,7 +475,61 @@ async fn try_lock_fails_while_the_driver_is_stopping() {
     cancel.cancel();
     settle().await;
 
-    assert!(let Err(_) = client.try_lock("report", LEASE).await);
+    assert!(let Err(_) = client.try_lock("report", TTL).await);
+}
+
+#[tokio::test(start_paused = true)]
+async fn try_lock_gives_the_stores_failure() {
+    let store = Faulty::default();
+    let (client, _cancel, _driving) = start(&store);
+
+    store.acquire_fails.store(true, Ordering::SeqCst);
+
+    assert!(let Err(_) = client.try_lock("purge", TTL).await);
+}
+
+#[tokio::test(start_paused = true)]
+async fn release_of_a_lost_lock_is_not_an_error() {
+    let store = Faulty::default();
+    let (client, _cancel, _driving) = start(&store);
+    let guard = lock(&client, "purge").await;
+
+    store.extend_and(Extending::LosesThem);
+    guard.lost().cancelled().await;
+
+    assert!(let Ok(()) = guard.release().await);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_lock_whose_extend_hung_once_is_kept() {
+    let store = Faulty::default();
+    let (client, _cancel, _driving) = start(&store);
+    let guard = lock(&client, "purge").await;
+
+    *store.extends_take.lock().unwrap() = GIVE_UP;
+    // Past the first extend, which hangs.
+    tokio::time::sleep(TTL.get() / 3 + Duration::from_millis(10)).await;
+    *store.extends_take.lock().unwrap() = Duration::ZERO;
+    tokio::time::sleep(TTL.get() * 2).await;
+
+    check!(held(&store, "purge").await);
+    check!(!guard.lost().is_cancelled());
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_hung_extend_doesnt_hold_up_extending_the_locks_taken_after_it() {
+    let store = Faulty::default();
+    let (client, _cancel, _driving) = start(&store);
+    let first = lock(&client, "purge").await;
+
+    *store.extends_take.lock().unwrap() = GIVE_UP;
+    first.lost().cancelled().await;
+    *store.extends_take.lock().unwrap() = Duration::ZERO;
+    let later = lock(&client, "report").await;
+    tokio::time::sleep(TTL.get() * 2).await;
+
+    check!(held(&store, "report").await);
+    check!(!later.lost().is_cancelled());
 }
 
 /// Generic code can use the port and run the driver on any provider.
@@ -484,7 +542,7 @@ fn generic_callers_compile<P: LockProvider, C: crate::HasLock + Send + Sync + 's
     tokio::spawn(driver.run(CancelToken::new()));
     tokio::spawn(async move {
         let lock = context.lock();
-        if let Ok(TryLock::Locked(guard)) = lock.try_lock("purge", LEASE).await {
+        if let Ok(TryLock::Locked(guard)) = lock.try_lock("purge", TTL).await {
             tokio::task::yield_now().await;
             drop(guard);
         }

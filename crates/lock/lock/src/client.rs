@@ -9,7 +9,7 @@ use tokio::time::Instant;
 use uima_cancel::CancelToken;
 use uima_core::{Failure, FailureKind, PortResult};
 
-use crate::driver::{LockDriver, deadline};
+use crate::driver::{Kept, LockDriver};
 use crate::{Lease, LockProvider, TryAcquire, Ttl};
 
 #[cfg(all(test, feature = "testing"))]
@@ -40,9 +40,9 @@ pub fn new<P: LockProvider>(provider: P) -> (LockClient<P>, LockDriver<P>) {
     let (sender, messages) = mpsc::unbounded_channel();
     let client = LockClient {
         provider: provider.clone(),
-        driver: sender,
+        driver: sender.clone(),
     };
-    let driver = LockDriver::new(provider, messages);
+    let driver = LockDriver::new(provider, messages, sender.clone());
     (client, driver)
 }
 
@@ -65,10 +65,12 @@ impl<P> Clone for LockClient<P> {
 
 impl<P: LockProvider> Lock for LockClient<P> {
     async fn try_lock(&self, key: &str, ttl: Ttl) -> PortResult<TryLock> {
-        if self.driver.is_closed() {
+        let stopped = || {
             let stopped = anyhow!("the lock driver has stopped");
-            let failure = Failure::new(FailureKind::Unavailable, stopped);
-            return Err(failure.context(format!("failed to lock {key}")).into());
+            Failure::new(FailureKind::Unavailable, stopped).context(format!("failed to lock {key}"))
+        };
+        if self.driver.is_closed() {
+            return Err(stopped().into());
         }
 
         let taken_at = Instant::now();
@@ -83,7 +85,7 @@ impl<P: LockProvider> Lock for LockClient<P> {
             lost: lost.clone(),
             taken_at,
         };
-        if Instant::now() >= deadline(taken_at, lease.ttl.get()) {
+        if Instant::now() >= Kept::deadline_after(taken_at, lease.ttl.get()) {
             // Taken too slowly to keep, so it may be expiring already.
             lost.cancel();
         }
@@ -92,9 +94,7 @@ impl<P: LockProvider> Lock for LockClient<P> {
             // would extend the lease or let it go, so it would keep the key from everyone until
             // its ttl ends; let it go here instead.
             self.provider.unlock(&lease).await?;
-            let stopped = anyhow!("the lock driver has stopped");
-            let failure = Failure::new(FailureKind::Unavailable, stopped);
-            return Err(failure.context(format!("failed to lock {key}")).into());
+            return Err(stopped().into());
         }
 
         Ok(TryLock::Locked(LockGuard {
@@ -138,14 +138,18 @@ impl LockGuard {
         if self.driver.send(Message::Release { lease, done }).is_err() {
             return Ok(());
         }
-        released.await.unwrap_or(Ok(()))
+        match released.await {
+            Ok(released) => released,
+            // The driver ended before answering.
+            Err(_) => Ok(()),
+        }
     }
 }
 
 impl Drop for LockGuard {
     fn drop(&mut self) {
         if let Some(lease) = self.lease.take() {
-            // A stopped driver has let go of it already.
+            // A driver that has ended let go of it as it stopped, or left it to expire.
             self.driver.send(Message::Dropped { lease }).ok();
         }
     }

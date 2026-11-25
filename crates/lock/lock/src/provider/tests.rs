@@ -17,6 +17,7 @@ enum Break {
     UnlockKeeps,
     NeverExpires,
     ExtendForgets,
+    ExtendByMin,
     ExtendRotated,
     UnlockByKey,
 }
@@ -72,6 +73,16 @@ impl LockProvider for Broken {
     async fn extend(&self, leases: &[Lease]) -> PortResult<Vec<Extended>> {
         match self.breaks {
             Some(ExtendForgets) => Ok(vec![Extended::Held; leases.len()]),
+            Some(ExtendByMin) => {
+                let short: Vec<Lease> = leases
+                    .iter()
+                    .map(|lease| Lease {
+                        ttl: Ttl::MIN,
+                        ..lease.clone()
+                    })
+                    .collect();
+                self.store.extend(&short).await
+            }
             Some(ExtendRotated) => {
                 let mut extended = self.store.extend(leases).await?;
                 extended.rotate_left(1);
@@ -114,6 +125,7 @@ async fn the_contract_fails_each_broken_store() {
         UnlockKeeps,
         NeverExpires,
         ExtendForgets,
+        ExtendByMin,
         ExtendRotated,
         UnlockByKey,
     ] {
@@ -158,6 +170,12 @@ async fn each_case_fails_the_store_breaking_it() {
     check!(
         fails(ExtendForgets, |p| async move {
             contract::extend_keeps_a_lease_past_its_ttl(&p).await
+        })
+        .await
+    );
+    check!(
+        fails(ExtendByMin, |p| async move {
+            contract::extend_keeps_each_lease_for_its_own_ttl(&p).await
         })
         .await
     );
