@@ -3174,6 +3174,7 @@ name = "uima-lock"
 version = "0.0.0"
 dependencies = [
  "anyhow",
+ "futures-util",
  "tokio",
  "tracing",
  "uima-cancel",

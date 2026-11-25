@@ -1,7 +1,7 @@
 //! The cases a [`LockProvider`] passes, run by each adapter.
 //!
-//! Cases wait for leases to expire with tokio's clock, so on a store that expires them by its own
-//! clock they take about [`TTL`] each.
+//! Cases that wait for a lease to expire do so with tokio's clock, so on a store that expires them
+//! by its own clock they take a little more than [`TTL`] each.
 
 use std::time::Duration;
 

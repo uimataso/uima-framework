@@ -52,6 +52,6 @@ pub struct Lease {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Extended {
     Held,
-    /// It had expired, and may since have been taken.
+    /// It had expired or been let go, and may since have been taken.
     Lost,
 }

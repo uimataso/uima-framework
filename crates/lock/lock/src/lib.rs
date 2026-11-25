@@ -8,14 +8,13 @@
 //! # Examples
 //!
 //! ```
-//! # async fn example() -> anyhow::Result<()> {
+//! # async fn example(provider: impl uima_lock::LockProvider) -> anyhow::Result<()> {
 //! use std::time::Duration;
 //!
 //! use uima_cancel::CancelToken;
-//! use uima_lock::testing::MemoryLockProvider;
 //! use uima_lock::{Lock as _, TryLock};
 //!
-//! let (client, driver) = uima_lock::new(MemoryLockProvider::default());
+//! let (client, driver) = uima_lock::new(provider);
 //! let cancel = CancelToken::new();
 //! let driving = tokio::spawn(driver.run(cancel.clone()));
 //!
@@ -28,20 +27,20 @@
 //! driving.await?;
 //! # Ok(())
 //! # }
-//! # let runtime = tokio::runtime::Builder::new_current_thread().enable_time().build();
-//! # runtime.unwrap().block_on(example()).unwrap();
 //! ```
 //!
 //! # Features
 //!
-//! - `testing`: [`testing::MemoryLockProvider`] and the [`contract`] every provider passes.
+//! - `testing`: adds `testing::MemoryLockProvider` and the `contract` every provider passes.
 
 mod client;
 mod provider;
 #[cfg(feature = "testing")]
 pub mod testing;
 
-pub use client::{Lock, LockClient, LockDriver, LockGuard, TryLock, new};
+pub use client::{
+    HasLock, Lock, LockClient, LockDriver, LockGuard, MAX_TTL, MIN_TTL, TryLock, new,
+};
 #[cfg(feature = "testing")]
 pub use provider::contract;
 pub use provider::{Extended, Lease, LockProvider, TryAcquire};
