@@ -51,12 +51,12 @@ use crate::Subsystem;
 mod tests;
 
 /// The gauge of when a job's last run succeeded, or it started if none has yet, in unix seconds,
-/// with the job's name as its `worker` label.
-pub const HEARTBEAT: &str = "worker_last_success_timestamp_seconds";
+/// with the job's name as its `job_name` label, as in the job's logs.
+pub const HEARTBEAT: &str = "job_last_success_timestamp_seconds";
 
 /// A job that runs over and over, such as a cleanup, through [`Runner`].
 pub trait Job: Send {
-    /// Names the job in logs and in the [`HEARTBEAT`] gauge's `worker` label. Each job in a service
+    /// Names the job as `job_name` in logs and in the [`HEARTBEAT`] gauge. Each job in a service
     /// needs its own, non-empty name, since jobs sharing a name share one heartbeat.
     fn name(&self) -> &str;
 
@@ -139,16 +139,16 @@ impl<J: Job> Runner<J> {
     async fn run_on(mut self, cancel: CancelToken, clock: &impl Clock) -> anyhow::Result<()> {
         // Owned, since each run borrows the job mutably.
         let name = self.job.name().to_owned();
-        let job = name.as_str();
+        let job_name = name.as_str();
 
         // Set after every run, and looked up each time, so a recorder installed after the start
         // gets the last success from the next run on, even while runs fail.
         let mut last_success = clock.now().unix_seconds();
 
-        let beat = |at: f64| metrics::gauge!(HEARTBEAT, "worker" => name.clone()).set(at);
+        let beat = |at: f64| metrics::gauge!(HEARTBEAT, "job_name" => name.clone()).set(at);
         beat(last_success);
 
-        info!(job, "started");
+        info!(job_name, "started");
 
         let behavior = self.config.behavior;
 
@@ -189,26 +189,26 @@ impl<J: Job> Runner<J> {
 
             let stopping = cancel.is_cancelled();
             match (ran, stopping) {
-                (Ok(Ok(())), _) => debug!(job, ?took, "run succeeded"),
+                (Ok(Ok(())), _) => debug!(job_name, ?took, "run succeeded"),
                 (Ok(Err(error)), true) => {
-                    return Err(error.context(format!("{job} failed while stopping")));
+                    return Err(error.context(format!("{job_name} failed while stopping")));
                 }
                 (Ok(Err(error)), false) => {
-                    warn!(job, ?took, error = &*error, "run failed");
+                    warn!(job_name, ?took, error = &*error, "run failed");
                 }
                 (Err(panic), true) => {
                     return Err(
-                        panic_error(panic).context(format!("{job} panicked while stopping"))
+                        panic_error(panic).context(format!("{job_name} panicked while stopping"))
                     );
                 }
                 (Err(panic), false) => {
                     let error = panic_error(panic);
-                    error!(job, ?took, error = &*error, "run panicked");
+                    error!(job_name, ?took, error = &*error, "run panicked");
                 }
             }
         }
 
-        info!(job, "stopped");
+        info!(job_name, "stopped");
         Ok(())
     }
 }

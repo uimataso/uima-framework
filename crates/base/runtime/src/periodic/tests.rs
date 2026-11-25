@@ -263,9 +263,10 @@ async fn a_failed_or_panicking_run_is_followed_on_schedule() {
     );
     check!(logged(Level::ERROR, "run panicked", "broken"), "{events:?}");
     check!(
-        events
-            .iter()
-            .all(|event| event.fields.get("job").is_some_and(|job| job == "script")),
+        events.iter().all(|event| event
+            .fields
+            .get("job_name")
+            .is_some_and(|name| name == "script")),
         "{events:?}"
     );
 
@@ -539,13 +540,13 @@ async fn heartbeat_after(outcomes: &[Outcome]) -> (f64, f64, Vec<f64>) {
 fn heartbeat(snapshotter: &Snapshotter) -> f64 {
     let gauges = snapshotter.snapshot().into_vec();
     assert!(let [(key, _, _, DebugValue::Gauge(value))] = gauges.as_slice());
-    check!(key.key().name() == "worker_last_success_timestamp_seconds");
+    check!(key.key().name() == "job_last_success_timestamp_seconds");
     let labels: Vec<_> = key
         .key()
         .labels()
         .map(|label| (label.key(), label.value()))
         .collect();
-    check!(labels == [("worker", "wall")]);
+    check!(labels == [("job_name", "wall")]);
     value.into_inner()
 }
 
