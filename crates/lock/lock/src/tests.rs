@@ -268,6 +268,13 @@ async fn try_lock_fails_once_the_driver_has_stopped_or_been_dropped() {
         .unwrap();
     assert!(let Err(_) = client.try_lock("purge", TTL).await, "stopped");
     check!(!held(&store, "purge").await);
+
+    let (client, driver) = new(store.clone());
+    drop(driver);
+    let TryAcquire::Acquired(_) = store.store.try_acquire("purge", TTL).await.unwrap() else {
+        panic!("purge is busy");
+    };
+    assert!(let Err(_) = client.try_lock("purge", TTL).await, "held by another");
 }
 
 #[tokio::test(start_paused = true)]
@@ -552,6 +559,44 @@ async fn a_hung_extend_doesnt_hold_up_extending_the_locks_taken_after_it() {
 
     check!(held(&store, "report").await);
     check!(!later.lost().is_cancelled());
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_hung_extend_of_locks_of_different_ttls_is_retried_in_time_for_the_shortest() {
+    let store = Faulty::default();
+    let (client, _cancel, _driving) = start(&store);
+    *store.extends_take.lock().unwrap() = TTL.get() / 8;
+    let longer = match client.try_lock("report", Ttl::from_secs(6)).await {
+        Ok(TryLock::Locked(guard)) => guard,
+        other => panic!("report not locked: {other:?}"),
+    };
+    tokio::time::sleep(TTL.get() / 3).await;
+    // Due for its first extend with the longer lock's, as one batch.
+    let shorter = lock(&client, "purge").await;
+
+    tokio::time::sleep(TTL.get() / 6).await;
+    *store.extends_take.lock().unwrap() = GIVE_UP;
+    // Past the batch, which hangs, and its wait for the shorter ttl.
+    tokio::time::sleep(TTL.get() * 11 / 30).await;
+    *store.extends_take.lock().unwrap() = TTL.get() / 8;
+    tokio::time::sleep(TTL.get()).await;
+
+    check!(!shorter.lost().is_cancelled());
+    check!(!longer.lost().is_cancelled());
+}
+
+#[tokio::test(start_paused = true)]
+async fn release_is_not_an_error_when_the_driver_ends_before_answering() {
+    let store = Faulty::default();
+    let (client, _cancel, driving) = start(&store);
+    let guard = lock(&client, "purge").await;
+    *store.unlocks_take.lock().unwrap() = GIVE_UP;
+
+    let released = tokio::spawn(guard.release());
+    settle().await;
+    driving.abort();
+
+    assert!(let Ok(Ok(())) = tokio::time::timeout(GIVE_UP, released).await.unwrap());
 }
 
 /// Generic code can use the port and run the driver on any provider.
