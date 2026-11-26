@@ -77,28 +77,26 @@ impl<P: LockProvider> Lock for LockClient<P> {
             TryAcquire::Busy => return Ok(TryLock::Busy),
         };
 
-        if Instant::now() >= Kept::deadline_after(taken_at, lease.ttl.get()) {
-            // Taken too slowly to keep, as it may be expiring already, so the driver lets it go.
-            self.driver.dropped(lease);
-            return failed(
+        let lost = CancelToken::new();
+        let (kind, reason) = if Instant::now() >= Kept::deadline_after(taken_at, lease.ttl.get()) {
+            // Taken too slowly to keep, as it may be expiring already.
+            (
                 FailureKind::Timeout,
                 "the store answered too slowly to keep it",
-            );
-        }
-        let lost = CancelToken::new();
-        if !self.driver.held(lease.clone(), lost.clone(), taken_at) {
+            )
+        } else if !self.driver.held(lease.clone(), lost.clone(), taken_at) {
             // The driver stopped while the lease was being taken, after the check at the start.
-            // Nothing would extend the lease or let it go, so it would keep the key from everyone
-            // until its ttl ends; let it go here instead.
-            driver::let_go(&*self.provider, &lease, lease.ttl.get()).await?;
-            return failed(FailureKind::Unavailable, stopped);
-        }
-
-        Ok(TryLock::Locked(LockGuard {
-            lease: Some(lease),
-            lost,
-            driver: self.driver.clone(),
-        }))
+            (FailureKind::Unavailable, stopped)
+        } else {
+            return Ok(TryLock::Locked(LockGuard {
+                lease: Some(lease),
+                lost,
+                driver: self.driver.clone(),
+            }));
+        };
+        // Nothing keeps the lease, so it would keep the key from everyone until its ttl ends.
+        driver::let_go(&*self.provider, &lease, lease.ttl.get()).await?;
+        failed(kind, reason)
     }
 }
 
