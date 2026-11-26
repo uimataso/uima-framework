@@ -5,6 +5,11 @@
 //! or gone loses it. [`new`] gives a [`LockClient`] to take locks with, and a [`LockDriver`] that
 //! keeps the held ones alive and lets the dropped ones go, which must run for the client to work.
 //!
+//! It keeps instances from doing the same work at once; it doesn't guard writes. A holder that
+//! takes more than a fifth of its `ttl` to stop once [`lost`](LockGuard::lost) is cancelled may
+//! overlap the next one, so a write that must not happen twice is idempotent, or checks in its
+//! transaction that the lock is still held.
+//!
 //! # Examples
 //!
 //! ```

@@ -16,6 +16,8 @@ pub trait Lock: Send + Sync {
     /// Takes the lock on `key` for `ttl` without waiting, kept alive until the guard is dropped
     /// or released.
     ///
+    /// A key this instance holds already is busy too.
+    ///
     /// Fails when the store does, or answers too slowly to keep the lock, or once the
     /// [`LockDriver`] has stopped or been dropped. One that fails or is cancelled may leave the
     /// key held, with no guard, until `ttl` ends.

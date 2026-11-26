@@ -21,8 +21,8 @@ mod kept;
 /// once its lease is lost.
 ///
 /// A lease counts as lost once the store says it was let go or taken, or once it goes unextended
-/// for most of its `ttl`, however slow the store is, so its holder stops before the store lets
-/// another take it.
+/// for four fifths of its `ttl`, however slow the store is, so a holder that stops within the
+/// fifth left stops before the store lets another take it.
 #[must_use = "a lock taken without the driver running expires"]
 pub struct LockDriver<P> {
     provider: Arc<P>,
