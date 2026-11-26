@@ -6,7 +6,7 @@ use anyhow::anyhow;
 use tokio::task::JoinHandle;
 use tokio::time::Instant;
 use uima_cancel::CancelToken;
-use uima_core::{Failure, FailureKind, PortResult};
+use uima_core::{Failure, FailureKind, PortError, PortResult};
 use uima_testing::{assert, check};
 
 use crate::testing::MemoryLockProvider;
@@ -416,8 +416,9 @@ async fn a_lock_extended_slowly_is_lost_by_its_ttl_from_when_the_extend_was_sent
     let store = Faulty::default();
     let (client, _cancel, _driving) = start(&store);
     let guard = lock(&client, "purge").await;
-    *store.extends_take.lock().unwrap() = TTL.get() / 4;
+    *store.extends_take.lock().unwrap() = TTL.get() / 8;
     tokio::time::sleep(TTL.get()).await;
+    check!(!guard.lost().is_cancelled(), "kept while extends answer");
 
     store.extend_and(Extending::Fails);
     tokio::time::timeout(GIVE_UP, guard.lost().cancelled())
@@ -426,8 +427,8 @@ async fn a_lock_extended_slowly_is_lost_by_its_ttl_from_when_the_extend_was_sent
 
     let extended = store.last_extended.lock().unwrap().unwrap();
     check!(
-        Instant::now() < extended + TTL.get(),
-        "before the store lets another take it"
+        Instant::now() <= extended + TTL.get() * 4 / 5,
+        "a little before the store lets another take it"
     );
 }
 
@@ -450,9 +451,10 @@ async fn a_lock_given_up_is_let_go_before_its_ttl_ends() {
 async fn a_lock_taken_too_slowly_to_keep_fails_and_is_let_go() {
     let store = Faulty::default();
     let (client, _cancel, _driving) = start(&store);
-    store.reply_in(TTL.get());
+    store.reply_in(TTL.get() * 9 / 10);
 
-    assert!(let Err(_) = client.try_lock("purge", TTL).await);
+    assert!(let Err(PortError::Failed(failure)) = client.try_lock("purge", TTL).await);
+    check!(failure.kind() == FailureKind::Timeout);
     store.reply_in(Duration::ZERO);
     settle().await;
 
