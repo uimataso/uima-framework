@@ -15,21 +15,20 @@ pub(crate) struct Kept {
     pub(super) lease: Lease,
     lost: CancelToken,
     pub(super) next_extend: Instant,
-    /// When it counts as lost unless extended, a little before the store may expire it, from
-    /// when the last request that held it was sent.
-    pub(super) deadline: Instant,
+    /// When the last request that held it was sent.
+    held_at: Instant,
     /// Whether an extend of it is out.
     pub(super) extending: bool,
 }
 
 impl Kept {
+    /// How many times an extend can be waited out per `ttl`, so one retried after it still is
+    /// before the deadline.
+    pub(super) const WAITS_PER_TTL: u32 = 6;
     /// How many times a lease is extended per `ttl`.
     const EXTENDS_PER_TTL: u32 = 3;
     /// How many times a lease is retried per `ttl` after a failed extend.
     const RETRIES_PER_TTL: u32 = 10;
-    /// How many times an extend can be waited out per `ttl`, so one retried after it still is
-    /// before the deadline.
-    pub(super) const WAITS_PER_TTL: u32 = 6;
 
     /// When a lease held by a request sent at `sent` counts as lost unless extended again, a
     /// little before the store may expire it.
@@ -42,7 +41,7 @@ impl Kept {
             lease,
             lost,
             next_extend: taken_at,
-            deadline: taken_at,
+            held_at: taken_at,
             extending: false,
         };
         kept.extended(taken_at);
@@ -51,9 +50,18 @@ impl Kept {
 
     /// Schedules the next extend after one sent at `sent` held the lease.
     pub(super) fn extended(&mut self, sent: Instant) {
-        let ttl = self.lease.ttl.get();
-        self.next_extend = sent + ttl / Self::EXTENDS_PER_TTL;
-        self.deadline = Self::deadline_after(sent, ttl);
+        self.next_extend = sent + self.lease.ttl.get() / Self::EXTENDS_PER_TTL;
+        self.held_at = sent;
+    }
+
+    /// When it counts as lost unless extended, a little before the store may expire it.
+    pub(super) fn deadline(&self) -> Instant {
+        Self::deadline_after(self.held_at, self.lease.ttl.get())
+    }
+
+    /// When the store may expire it, by this instance's clock.
+    pub(super) fn expires(&self) -> Instant {
+        self.held_at + self.lease.ttl.get()
     }
 
     /// Schedules the next extend soon, after one failed.
@@ -61,13 +69,13 @@ impl Kept {
         self.next_extend = Instant::now() + self.lease.ttl.get() / Self::RETRIES_PER_TTL;
     }
 
-    /// When it is next due: to be extended, or given up on. While it is being extended, only
+    /// When it is next due, to be extended or given up on. While it is being extended, only
     /// the latter.
     pub(super) fn due(&self) -> Instant {
         if self.extending {
-            self.deadline
+            self.deadline()
         } else {
-            self.next_extend.min(self.deadline)
+            self.next_extend.min(self.deadline())
         }
     }
 }

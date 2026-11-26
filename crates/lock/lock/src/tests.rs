@@ -416,6 +416,27 @@ async fn stopping_with_a_slow_store_cancels_every_lost_at_once() {
 }
 
 #[tokio::test(start_paused = true)]
+async fn stopping_with_a_slow_unlock_ends_by_when_the_lock_would_expire() {
+    let store = Faulty::default();
+    let (client, cancel, driving) = start(&store);
+    let _guard = lock(&client, "purge").await;
+    tokio::time::sleep(TTL.get() / 2).await;
+    *store.unlocks_take.lock().unwrap() = GIVE_UP;
+
+    cancel.cancel();
+    tokio::time::timeout(GIVE_UP, driving)
+        .await
+        .unwrap()
+        .unwrap();
+
+    let extended = store.last_extended.lock().unwrap().unwrap();
+    check!(
+        Instant::now() <= extended + TTL.get(),
+        "as an unlock after then would do nothing"
+    );
+}
+
+#[tokio::test(start_paused = true)]
 async fn a_driver_ended_early_cancels_lost() {
     let store = Faulty::default();
     let (client, _cancel, driving) = start(&store);

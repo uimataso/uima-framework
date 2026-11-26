@@ -51,11 +51,13 @@ impl<P: LockProvider> Driving<P> {
             }
             Message::Release { lease, done } => {
                 self.kept.remove(&lease.token);
-                self.unlock(lease, Some(done));
+                let wait = lease.ttl.get();
+                self.unlock(lease, wait, Some(done));
             }
             Message::Dropped { lease } => {
                 self.kept.remove(&lease.token);
-                self.unlock(lease, None);
+                let wait = lease.ttl.get();
+                self.unlock(lease, wait, None);
             }
         }
     }
@@ -66,13 +68,13 @@ impl<P: LockProvider> Driving<P> {
         let late: Vec<Uuid> = self
             .kept
             .values()
-            .filter(|kept| kept.deadline <= now)
+            .filter(|kept| kept.deadline() <= now)
             .map(|kept| kept.lease.token)
             .collect();
         for token in late {
             if let Some(kept) = self.kept.remove(&token) {
                 warn!(key = kept.lease.key, "lost a lock not extended in time");
-                self.unlock(kept.lease.clone(), None);
+                self.unlock(kept.lease.clone(), kept.lease.ttl.get(), None);
             }
         }
     }
@@ -146,17 +148,28 @@ impl<P: LockProvider> Driving<P> {
         }
     }
 
-    /// Stops keeping every lock, cancelling their `lost`, and lets them go.
+    /// Stops keeping every lock, cancelling their `lost`, and lets them go, giving up on each
+    /// once the store may have expired it.
     pub(super) fn let_all_go(&mut self) {
-        for (_, kept) in self.kept.drain() {
-            self.unlocking
-                .spawn(unlock(self.provider.clone(), kept.lease.clone(), None));
+        let now = Instant::now();
+        let kept: Vec<Kept> = self.kept.drain().map(|(_, kept)| kept).collect();
+        for kept in kept {
+            let wait = kept.expires().saturating_duration_since(now);
+            self.unlock(kept.lease.clone(), wait, None);
         }
     }
 
-    fn unlock(&mut self, lease: Lease, done: Option<oneshot::Sender<PortResult<()>>>) {
-        self.unlocking
-            .spawn(unlock(self.provider.clone(), lease, done));
+    fn unlock(
+        &mut self,
+        lease: Lease,
+        wait: Duration,
+        done: Option<oneshot::Sender<PortResult<()>>>,
+    ) {
+        let provider = self.provider.clone();
+        self.unlocking.spawn(async move {
+            let result = let_go(&*provider, &lease, wait).await;
+            UnlockReply { result, done }
+        });
     }
 }
 
@@ -182,19 +195,13 @@ impl UnlockReply {
     }
 }
 
-/// Lets `lease` go, giving up after its ttl.
-async fn unlock<P: LockProvider>(
-    provider: Arc<P>,
-    lease: Lease,
-    done: Option<oneshot::Sender<PortResult<()>>>,
-) -> UnlockReply {
-    let result = let_go(&*provider, &lease).await;
-    UnlockReply { result, done }
-}
-
-/// Lets `lease` go, giving up after its ttl, when it has expired anyway.
-pub(crate) async fn let_go(provider: &impl LockProvider, lease: &Lease) -> PortResult<()> {
-    let result = within(lease.ttl.get(), provider.unlock(lease)).await;
+/// Lets `lease` go, giving up after `wait`, once the store may have expired it anyway.
+pub(crate) async fn let_go(
+    provider: &impl LockProvider,
+    lease: &Lease,
+    wait: Duration,
+) -> PortResult<()> {
+    let result = within(wait, provider.unlock(lease)).await;
     if let Err(error) = &result {
         warn!(
             key = lease.key,

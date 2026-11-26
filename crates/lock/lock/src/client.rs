@@ -88,7 +88,7 @@ impl<P: LockProvider> Lock for LockClient<P> {
             // The driver stopped while the lease was being taken, after the check at the start.
             // Nothing would extend the lease or let it go, so it would keep the key from everyone
             // until its ttl ends; let it go here instead.
-            driver::let_go(&*self.provider, &lease).await?;
+            driver::let_go(&*self.provider, &lease, lease.ttl.get()).await?;
             return failed(FailureKind::Unavailable, stopped);
         }
 
