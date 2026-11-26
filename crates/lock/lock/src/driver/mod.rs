@@ -39,9 +39,8 @@ impl<P: LockProvider> LockDriver<P> {
     /// Keeps the locks until `cancel`, then cancels every guard's
     /// [`lost`](crate::LockGuard::lost), lets go of every lock still held, and ends.
     ///
-    /// Locks taken before it starts are kept too. Once it has started, dropping it cancels the
-    /// guards' `lost` as well, but leaves their locks to expire. A driver dropped without
-    /// running cancels nothing.
+    /// Locks taken before it starts are kept too. Dropping it, run or not, cancels the guards'
+    /// `lost` as well, but leaves their locks to expire.
     pub async fn run(mut self, cancel: CancelToken) {
         let mut driving = Driving::new(self.provider);
 
@@ -94,12 +93,8 @@ impl Driver {
     /// True when the driver will keep it. False when the driver has stopped, so nothing will
     /// extend the lease or let it go, and the caller lets it go itself.
     pub(crate) fn held(&self, lease: Lease, lost: CancelToken, taken_at: Instant) -> bool {
-        let held = Message::Held {
-            lease,
-            lost,
-            taken_at,
-        };
-        self.0.send(held).is_ok()
+        let kept = Kept::new(lease, lost, taken_at);
+        self.0.send(Message::Held(kept)).is_ok()
     }
 
     /// Has the driver let `lease` go, waiting until the store has.
@@ -128,13 +123,8 @@ impl Driver {
 /// What a [`Driver`] sends.
 #[derive(Debug)]
 enum Message {
-    /// A lock was taken by a request sent at `taken_at`; keep it alive and cancel `lost` once it
-    /// is lost.
-    Held {
-        lease: Lease,
-        lost: CancelToken,
-        taken_at: Instant,
-    },
+    /// A lock was taken; keep it alive. Dropped unread, as with the driver, it cancels `lost`.
+    Held(Kept),
     /// Let the lock go; answer through `done` once the store has.
     Release {
         lease: Lease,

@@ -41,13 +41,8 @@ impl<P: LockProvider> Driving<P> {
 
     pub(super) fn handle(&mut self, message: Message) {
         match message {
-            Message::Held {
-                lease,
-                lost,
-                taken_at,
-            } => {
-                self.kept
-                    .insert(lease.token, Kept::new(lease, lost, taken_at));
+            Message::Held(kept) => {
+                self.kept.insert(kept.lease.token, kept);
             }
             Message::Release { lease, done } => {
                 self.kept.remove(&lease.token);

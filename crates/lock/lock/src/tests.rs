@@ -457,15 +457,19 @@ async fn a_driver_ended_early_cancels_lost() {
 }
 
 #[tokio::test(start_paused = true)]
-async fn a_driver_dropped_without_running_cancels_nothing() {
+async fn a_driver_dropped_before_it_got_a_lock_cancels_its_lost() {
     let store = Faulty::default();
     let (client, driver) = new(store.clone());
     let guard = lock(&client, "purge").await;
-
     drop(driver);
-    settle().await;
+    check!(guard.lost().is_cancelled(), "never run");
 
-    check!(!guard.lost().is_cancelled());
+    let (client, driver) = new(store.clone());
+    let guard = lock(&client, "report").await;
+    let driving = tokio::spawn(driver.run(CancelToken::new()));
+    driving.abort();
+    settle().await;
+    check!(guard.lost().is_cancelled(), "aborted before it ran");
 }
 
 #[tokio::test(start_paused = true)]

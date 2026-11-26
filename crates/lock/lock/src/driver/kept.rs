@@ -11,6 +11,7 @@ use crate::Lease;
 ///
 /// Dropping it cancels `lost`, so a lock is lost once the driver stops keeping it, however that
 /// happens.
+#[derive(Debug)]
 pub(crate) struct Kept {
     pub(super) lease: Lease,
     lost: CancelToken,
