@@ -237,7 +237,10 @@ async fn stopping_the_driver_cancels_lost_and_lets_each_lock_go_once_its_holder_
     );
     check!(!driving.is_finished());
 
-    assert!(let Ok(()) = first.release().await);
+    assert!(
+        let Ok(Ok(())) = tokio::time::timeout(TTL.get() / 2, first.release()).await,
+        "once the store has, not once every lock is let go"
+    );
     check!(!held(&store, "purge").await, "once released");
     drop(second);
     tokio::time::timeout(GIVE_UP, driving)
@@ -245,6 +248,38 @@ async fn stopping_the_driver_cancels_lost_and_lets_each_lock_go_once_its_holder_
         .unwrap()
         .unwrap();
     check!(!held(&store, "report").await, "once dropped");
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_lock_let_go_once_stopping_gave_up_on_it_holds_up_neither_release_nor_the_driver() {
+    let store = Faulty::default();
+    let (client, cancel, driving) = start(&store);
+    let started = Instant::now();
+    let released = lock(&client, "purge").await;
+    let dropped = lock(&client, "report").await;
+    let longer = Ttl::from_secs(30);
+    let TryLock::Locked(_held) = client.try_lock("audit", longer).await.unwrap() else {
+        panic!("audit is busy")
+    };
+    *store.unlocks_take.lock().unwrap() = GIVE_UP;
+
+    cancel.cancel();
+    settle().await;
+    tokio::time::sleep(longer.get() - Duration::from_secs(1)).await;
+    assert!(
+        let Ok(Ok(())) = tokio::time::timeout(TTL.get() / 2, released.release()).await,
+        "at once, as it may have expired"
+    );
+    drop(dropped);
+    tokio::time::timeout(GIVE_UP, driving)
+        .await
+        .unwrap()
+        .unwrap();
+
+    check!(
+        Instant::now() <= started + longer.get(),
+        "by when the last lock would expire"
+    );
 }
 
 #[tokio::test(start_paused = true)]

@@ -56,13 +56,17 @@ impl<P: LockProvider> Driving<P> {
                     self.kept.insert(kept.lease.token, kept);
                 }
             },
-            Message::Release { lease, done } => {
-                let wait = self.forget(&lease);
-                self.unlock(lease, wait, Some(done));
-            }
+            Message::Release { lease, done } => match self.forget(&lease) {
+                Some(wait) => self.unlock(lease, wait, Some(done)),
+                // Given up on as it may have expired, so there is nothing to let go.
+                None => {
+                    done.send(Ok(())).ok();
+                }
+            },
             Message::Dropped { lease } => {
-                let wait = self.forget(&lease);
-                self.unlock(lease, wait, None);
+                if let Some(wait) = self.forget(&lease) {
+                    self.unlock(lease, wait, None);
+                }
             }
         }
     }
@@ -175,18 +179,15 @@ impl<P: LockProvider> Driving<P> {
             .is_some_and(|stopping| !stopping.is_empty())
     }
 
-    /// Stops keeping `lease`, giving how long to wait on letting it go: until it may have
-    /// expired once stopping, or its ttl.
-    fn forget(&mut self, lease: &Lease) -> Duration {
+    /// Stops keeping `lease`, giving how long to wait on letting it go: its ttl, or once
+    /// stopping, until it may have expired, or none once it may have.
+    fn forget(&mut self, lease: &Lease) -> Option<Duration> {
         self.kept.remove(&lease.token);
-        let expires = self
-            .stopping
-            .as_mut()
-            .and_then(|stopping| stopping.remove(&lease.token));
-        match expires {
-            Some(expires) => expires.saturating_duration_since(Instant::now()),
-            None => lease.ttl.get(),
-        }
+        let Some(stopping) = &mut self.stopping else {
+            return Some(lease.ttl.get());
+        };
+        let expires = stopping.remove(&lease.token)?;
+        Some(expires.saturating_duration_since(Instant::now()))
     }
 
     fn unlock(
