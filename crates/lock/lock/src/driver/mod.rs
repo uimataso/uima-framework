@@ -47,19 +47,20 @@ impl<P: LockProvider> LockDriver<P> {
         loop {
             let due = driving.due();
             tokio::select! {
-                // Cancel first, so the driver stops however busy it is.
+                // Cancel first, so the driver stops however busy it is, then what is due, so a
+                // lease is given up on in time however many messages and replies come in.
                 biased;
                 () = cancel.cancelled() => break,
-                // None once every client and guard is gone, which skips it only this time
-                // round, so the driver still runs until cancelled.
-                Some(message) = self.messages.recv() => driving.handle(message),
-                Some(reply) = driving.extending.join_next() => driving.extended(joined(reply)),
-                Some(reply) = driving.unlocking.join_next() => joined(reply).answer(),
                 () = sleep_until(due) => {
                     let now = Instant::now();
                     driving.give_up_late(now);
                     driving.extend_due(now);
                 }
+                // None once every client and guard is gone, which skips it only this time
+                // round, so the driver still runs until cancelled.
+                Some(message) = self.messages.recv() => driving.handle(message),
+                Some(reply) = driving.extending.join_next() => driving.extended(joined(reply)),
+                Some(reply) = driving.unlocking.join_next() => joined(reply).answer(),
             }
         }
 
