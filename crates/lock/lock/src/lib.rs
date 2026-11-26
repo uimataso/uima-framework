@@ -36,6 +36,8 @@ mod driver;
 mod provider;
 #[cfg(feature = "testing")]
 pub mod testing;
+#[cfg(all(test, feature = "testing"))]
+mod tests;
 mod ttl;
 
 pub use client::{HasLock, Lock, LockClient, LockGuard, TryLock, new};

@@ -10,9 +10,6 @@ use uima_core::{Failure, FailureKind, PortResult};
 use crate::driver::{Driver, Kept, LockDriver};
 use crate::{Lease, LockProvider, TryAcquire, Ttl};
 
-#[cfg(all(test, feature = "testing"))]
-mod tests;
-
 /// The port use cases take locks through.
 #[uima_port_macro::has_port]
 pub trait Lock: Send + Sync {

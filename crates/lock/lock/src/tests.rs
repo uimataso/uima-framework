@@ -1,14 +1,18 @@
-use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use anyhow::anyhow;
 use tokio::task::JoinHandle;
+use tokio::time::Instant;
+use uima_cancel::CancelToken;
+use uima_core::{Failure, FailureKind, PortResult};
 use uima_testing::{assert, check};
 
-use super::*;
 use crate::testing::MemoryLockProvider;
-use crate::{Extended, TryAcquire};
+use crate::{
+    Extended, Lease, Lock, LockClient, LockGuard, LockProvider, TryAcquire, TryLock, Ttl, new,
+};
 
 const TTL: Ttl = Ttl::from_secs(3);
 
