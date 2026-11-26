@@ -20,28 +20,20 @@ mod kept;
 /// go of those dropped or released, and cancelling a guard's [`lost`](crate::LockGuard::lost)
 /// once its lease is lost.
 ///
-/// A lease counts as lost once it goes unextended for most of its `ttl`, however slow the store
-/// is, so its holder stops before the store lets another take it.
+/// A lease counts as lost once the store says it was let go or taken, or once it goes unextended
+/// for most of its `ttl`, however slow the store is, so its holder stops before the store lets
+/// another take it.
 #[must_use = "a lock taken without the driver running expires"]
 pub struct LockDriver<P> {
     provider: Arc<P>,
     messages: mpsc::UnboundedReceiver<Message>,
-    /// Kept so `messages` stays open with every client and guard gone, since the driver still
-    /// runs until cancelled, as ending early would stop a service that runs it.
-    _open: Driver,
 }
 
 impl<P: LockProvider> LockDriver<P> {
     /// A driver over `provider`, and the [`Driver`] to tell it what to keep through.
     pub(crate) fn new(provider: Arc<P>) -> (Self, Driver) {
         let (sender, messages) = mpsc::unbounded_channel();
-        let driver = Driver(sender);
-        let lock_driver = Self {
-            provider,
-            messages,
-            _open: driver.clone(),
-        };
-        (lock_driver, driver)
+        (Self { provider, messages }, Driver(sender))
     }
 
     /// Keeps the locks until `cancel`, then cancels every guard's
@@ -59,6 +51,8 @@ impl<P: LockProvider> LockDriver<P> {
                 // Cancel first, so the driver stops however busy it is.
                 biased;
                 () = cancel.cancelled() => break,
+                // None once every client and guard is gone, which skips it only this time
+                // round, so the driver still runs until cancelled.
                 Some(message) = self.messages.recv() => driving.handle(message),
                 Some(reply) = driving.extending.join_next() => driving.extended(joined(reply)),
                 Some(reply) = driving.unlocking.join_next() => joined(reply).answer(),

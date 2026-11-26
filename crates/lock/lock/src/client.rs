@@ -113,8 +113,7 @@ pub struct LockGuard {
 }
 
 impl LockGuard {
-    /// Cancelled once the lock is lost, as when its lease went unextended for most of its `ttl`,
-    /// someone else took it, or the driver ended.
+    /// Cancelled once the lock is lost, as the [`LockDriver`] counts it, or the driver ends.
     ///
     /// The work it guards stops early once it is.
     pub fn lost(&self) -> &CancelToken {
