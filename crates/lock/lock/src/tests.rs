@@ -1,3 +1,4 @@
+use std::error::Error as _;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -257,7 +258,9 @@ async fn try_lock_fails_once_the_driver_has_stopped_or_been_dropped() {
     let store = Faulty::default();
     let (client, driver) = new(store.clone());
     drop(driver);
-    assert!(let Err(_) = client.try_lock("purge", TTL).await, "dropped");
+    assert!(let Err(error) = client.try_lock("purge", TTL).await, "dropped");
+    check!(error.to_string() == "failed to lock purge");
+    check!(error.source().unwrap().to_string() == "the lock driver has stopped");
     check!(!held(&store, "purge").await, "and it takes no lock");
 
     let (client, driver) = new(store.clone());
@@ -450,6 +453,19 @@ async fn a_driver_ended_early_cancels_lost() {
         guard.lost().is_cancelled(),
         "so the holder stops before the lease expires"
     );
+    check!(held(&store, "purge").await, "left to expire");
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_driver_dropped_without_running_cancels_nothing() {
+    let store = Faulty::default();
+    let (client, driver) = new(store.clone());
+    let guard = lock(&client, "purge").await;
+
+    drop(driver);
+    settle().await;
+
+    check!(!guard.lost().is_cancelled());
 }
 
 #[tokio::test(start_paused = true)]
