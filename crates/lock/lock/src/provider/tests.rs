@@ -1,5 +1,6 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Mutex;
+use std::time::Duration;
 
 use uima_testing::check;
 
@@ -20,6 +21,9 @@ enum Break {
     ExtendByMin,
     ExtendRotated,
     UnlockByKey,
+    WholeSeconds,
+    ExtendRevives,
+    RacyAcquire,
 }
 
 /// A [`MemoryLockProvider`] broken as `breaks` says.
@@ -29,6 +33,8 @@ struct Broken {
     breaks: Option<Break>,
     /// Each key's newest lease, for `UnlockByKey`.
     newest: Mutex<HashMap<String, Lease>>,
+    /// The leases let go, for `ExtendRevives`.
+    unlocked: Mutex<HashSet<Uuid>>,
 }
 
 impl Broken {
@@ -45,8 +51,26 @@ impl LockProvider for Broken {
         let (store_key, store_ttl) = match self.breaks {
             Some(OneKey) => ("one", ttl),
             Some(NeverExpires) => (key, Ttl::MAX),
+            Some(WholeSeconds) => (key, whole_seconds(ttl)),
             _ => (key, ttl),
         };
+        if self.breaks == Some(RacyAcquire) {
+            // Checks the key is free, then takes it later, so another can take it in between.
+            let TryAcquire::Acquired(seen) = self.store.try_acquire(key, ttl).await? else {
+                return Ok(TryAcquire::Busy);
+            };
+            self.store.unlock(&seen).await?;
+            tokio::task::yield_now().await;
+            let token = match self.store.try_acquire(key, ttl).await? {
+                TryAcquire::Acquired(lease) => lease.token,
+                TryAcquire::Busy => Uuid::now_v7(),
+            };
+            return Ok(TryAcquire::Acquired(Lease {
+                key: key.to_owned(),
+                token,
+                ttl,
+            }));
+        }
         let got = self.store.try_acquire(store_key, store_ttl).await?;
         let mut lease = match (got, self.breaks) {
             (TryAcquire::Acquired(lease), _) => lease,
@@ -83,6 +107,31 @@ impl LockProvider for Broken {
                     .collect();
                 self.store.extend(&short).await
             }
+            Some(WholeSeconds) => {
+                let whole: Vec<Lease> = leases
+                    .iter()
+                    .map(|lease| Lease {
+                        ttl: whole_seconds(lease.ttl),
+                        ..lease.clone()
+                    })
+                    .collect();
+                self.store.extend(&whole).await
+            }
+            Some(ExtendRevives) => {
+                // Extends a lease nobody let go or took, expired or not.
+                let mut extended = self.store.extend(leases).await?;
+                for (lease, extended) in leases.iter().zip(&mut extended) {
+                    let unlocked = self.unlocked.lock().unwrap().contains(&lease.token);
+                    if *extended == Extended::Lost
+                        && !unlocked
+                        && let TryAcquire::Acquired(_) =
+                            self.store.try_acquire(&lease.key, lease.ttl).await?
+                    {
+                        *extended = Extended::Held;
+                    }
+                }
+                Ok(extended)
+            }
             Some(ExtendRotated) => {
                 let mut extended = self.store.extend(leases).await?;
                 extended.rotate_left(1);
@@ -93,6 +142,7 @@ impl LockProvider for Broken {
     }
 
     async fn unlock(&self, lease: &Lease) -> PortResult<()> {
+        self.unlocked.lock().unwrap().insert(lease.token);
         match self.breaks {
             Some(UnlockKeeps) => Ok(()),
             Some(UnlockByKey) => {
@@ -104,6 +154,11 @@ impl LockProvider for Broken {
             _ => self.store.unlock(lease).await,
         }
     }
+}
+
+/// `ttl` cut to whole seconds.
+fn whole_seconds(ttl: Ttl) -> Ttl {
+    Ttl::new(Duration::from_secs(ttl.get().as_secs())).unwrap()
 }
 
 /// Whether `case` fails on a store broken as `breaks` says.
@@ -128,6 +183,9 @@ async fn the_contract_fails_each_broken_store() {
         ExtendByMin,
         ExtendRotated,
         UnlockByKey,
+        WholeSeconds,
+        ExtendRevives,
+        RacyAcquire,
     ] {
         let ran = tokio::spawn(contract::run_all(async move || Broken::new(breaks))).await;
 
@@ -194,6 +252,24 @@ async fn each_case_fails_the_store_breaking_it() {
     check!(
         fails(UnlockByKey, |p| async move {
             contract::unlock_of_a_lost_lease_leaves_the_new_holder(&p).await
+        })
+        .await
+    );
+    check!(
+        fails(WholeSeconds, |p| async move {
+            contract::a_lease_is_kept_for_the_part_seconds_of_its_ttl(&p).await
+        })
+        .await
+    );
+    check!(
+        fails(ExtendRevives, |p| async move {
+            contract::extend_of_an_expired_lease_is_lost(&p).await
+        })
+        .await
+    );
+    check!(
+        fails(RacyAcquire, |p| async move {
+            contract::acquire_at_once_takes_a_key_once(&p).await
         })
         .await
     );

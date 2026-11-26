@@ -1,7 +1,7 @@
 //! The cases a [`LockProvider`] passes, run by each adapter.
 //!
 //! Cases that wait for a lease to expire do so with tokio's clock, so on a store that expires them
-//! by its own clock they take a little more than [`TTL`] each.
+//! by its own clock they take a few seconds each.
 
 use std::time::Duration;
 
@@ -20,13 +20,16 @@ const EXPIRED: Duration = Duration::from_millis(1500);
 pub async fn run_all<P: LockProvider>(isolated: impl AsyncFn() -> P) {
     run_case(&isolated, acquire_takes_a_free_key).await;
     run_case(&isolated, acquire_on_a_held_key_is_busy).await;
+    run_case(&isolated, acquire_at_once_takes_a_key_once).await;
     run_case(&isolated, keys_are_locked_apart).await;
     run_case(&isolated, unlock_frees_the_key).await;
     run_case(&isolated, an_expired_lease_can_be_taken).await;
+    run_case(&isolated, a_lease_is_kept_for_the_part_seconds_of_its_ttl).await;
     run_case(&isolated, extend_keeps_a_lease_past_its_ttl).await;
     run_case(&isolated, extend_keeps_each_lease_for_its_own_ttl).await;
     run_case(&isolated, extend_tells_each_lease_in_order).await;
     run_case(&isolated, extend_after_unlock_is_lost).await;
+    run_case(&isolated, extend_of_an_expired_lease_is_lost).await;
     run_case(&isolated, unlock_of_a_lost_lease_leaves_the_new_holder).await;
 }
 
@@ -44,6 +47,20 @@ pub async fn acquire_on_a_held_key_is_busy(provider: &impl LockProvider) -> anyh
     acquire(provider, &key, TTL).await?;
 
     check!(provider.try_acquire(&key, TTL).await? == TryAcquire::Busy);
+    Ok(())
+}
+
+pub async fn acquire_at_once_takes_a_key_once(provider: &impl LockProvider) -> anyhow::Result<()> {
+    let key = key();
+    let acquire = || provider.try_acquire(&key, TTL);
+    for state in ["free", "expired"] {
+        let got = tokio::join!(acquire(), acquire(), acquire(), acquire());
+        let got = [got.0?, got.1?, got.2?, got.3?];
+
+        let acquired = got.iter().filter(|got| *got != &TryAcquire::Busy).count();
+        check!(acquired == 1, "{state}");
+        tokio::time::sleep(EXPIRED).await;
+    }
     Ok(())
 }
 
@@ -70,6 +87,29 @@ pub async fn an_expired_lease_can_be_taken(provider: &impl LockProvider) -> anyh
 
     let second = acquire(provider, &key, TTL).await?;
     check!(second.token != first.token);
+    Ok(())
+}
+
+pub async fn a_lease_is_kept_for_the_part_seconds_of_its_ttl(
+    provider: &impl LockProvider,
+) -> anyhow::Result<()> {
+    let ttl = Ttl::new(Duration::from_millis(1500))?;
+    // Past its whole seconds, but not its ttl.
+    let past_whole_seconds = Duration::from_millis(1200);
+    let key = key();
+    let lease = acquire(provider, &key, ttl).await?;
+    tokio::time::sleep(past_whole_seconds).await;
+    check!(
+        provider.try_acquire(&key, TTL).await? == TryAcquire::Busy,
+        "taken"
+    );
+
+    check!(provider.extend(std::slice::from_ref(&lease)).await? == [Extended::Held]);
+    tokio::time::sleep(past_whole_seconds).await;
+    check!(
+        provider.try_acquire(&key, TTL).await? == TryAcquire::Busy,
+        "extended"
+    );
     Ok(())
 }
 
@@ -115,6 +155,16 @@ pub async fn extend_tells_each_lease_in_order(provider: &impl LockProvider) -> a
 pub async fn extend_after_unlock_is_lost(provider: &impl LockProvider) -> anyhow::Result<()> {
     let lease = acquire(provider, &key(), TTL).await?;
     provider.unlock(&lease).await?;
+
+    check!(provider.extend(std::slice::from_ref(&lease)).await? == [Extended::Lost]);
+    Ok(())
+}
+
+pub async fn extend_of_an_expired_lease_is_lost(
+    provider: &impl LockProvider,
+) -> anyhow::Result<()> {
+    let lease = acquire(provider, &key(), TTL).await?;
+    tokio::time::sleep(EXPIRED).await;
 
     check!(provider.extend(std::slice::from_ref(&lease)).await? == [Extended::Lost]);
     Ok(())
