@@ -426,7 +426,7 @@ async fn stopping_with_a_slow_store_cancels_every_lost_at_once() {
 }
 
 #[tokio::test(start_paused = true)]
-async fn stopping_with_a_slow_unlock_ends_by_when_the_lock_would_expire() {
+async fn stopping_ends_by_when_the_lock_would_expire_while_its_guard_is_held() {
     let store = Faulty::default();
     let (client, cancel, driving) = start(&store);
     let _guard = lock(&client, "purge").await;
@@ -434,6 +434,29 @@ async fn stopping_with_a_slow_unlock_ends_by_when_the_lock_would_expire() {
     *store.unlocks_take.lock().unwrap() = GIVE_UP;
 
     cancel.cancel();
+    tokio::time::timeout(GIVE_UP, driving)
+        .await
+        .unwrap()
+        .unwrap();
+
+    let extended = store.last_extended.lock().unwrap().unwrap();
+    check!(
+        Instant::now() <= extended + TTL.get(),
+        "as an unlock after then would do nothing"
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn stopping_with_a_slow_unlock_ends_by_when_the_lock_would_expire_once_let_go() {
+    let store = Faulty::default();
+    let (client, cancel, driving) = start(&store);
+    let guard = lock(&client, "purge").await;
+    tokio::time::sleep(TTL.get() / 2).await;
+    *store.unlocks_take.lock().unwrap() = GIVE_UP;
+
+    cancel.cancel();
+    settle().await;
+    drop(guard);
     tokio::time::timeout(GIVE_UP, driving)
         .await
         .unwrap()
