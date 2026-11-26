@@ -221,23 +221,30 @@ async fn a_lock_that_fails_to_extend_is_lost_before_its_ttl_ends() {
 }
 
 #[tokio::test(start_paused = true)]
-async fn stopping_the_driver_lets_every_lock_go_and_cancels_lost() {
+async fn stopping_the_driver_cancels_lost_and_lets_each_lock_go_once_its_holder_stops() {
     let store = Faulty::default();
     let (client, cancel, driving) = start(&store);
     let first = lock(&client, "purge").await;
     let second = lock(&client, "report").await;
 
     cancel.cancel();
+    settle().await;
+    check!(first.lost().is_cancelled());
+    check!(second.lost().is_cancelled());
+    check!(
+        held(&store, "purge").await,
+        "so another can't take it while the holder stops"
+    );
+    check!(!driving.is_finished());
+
+    assert!(let Ok(()) = first.release().await);
+    check!(!held(&store, "purge").await, "once released");
+    drop(second);
     tokio::time::timeout(GIVE_UP, driving)
         .await
         .unwrap()
         .unwrap();
-
-    check!(first.lost().is_cancelled());
-    check!(second.lost().is_cancelled());
-    check!(!held(&store, "purge").await);
-    check!(!held(&store, "report").await);
-    assert!(let Ok(()) = first.release().await, "it is let go already");
+    check!(!held(&store, "report").await, "once dropped");
 }
 
 #[tokio::test(start_paused = true)]
@@ -494,7 +501,7 @@ async fn a_lock_extended_slowly_is_lost_by_its_ttl_from_when_the_extend_was_sent
 }
 
 #[tokio::test(start_paused = true)]
-async fn a_lock_given_up_is_let_go_before_its_ttl_ends() {
+async fn a_lock_given_up_is_let_go_once_its_holder_stops() {
     let store = Faulty::default();
     let (client, _cancel, _driving) = start(&store);
     let guard = lock(&client, "purge").await;
@@ -504,8 +511,14 @@ async fn a_lock_given_up_is_let_go_before_its_ttl_ends() {
         .await
         .unwrap();
     settle().await;
+    check!(
+        held(&store, "purge").await,
+        "so another can't take it while the holder stops"
+    );
 
-    check!(!held(&store, "purge").await);
+    drop(guard);
+    settle().await;
+    check!(!held(&store, "purge").await, "before its ttl ends");
 }
 
 #[tokio::test(start_paused = true)]

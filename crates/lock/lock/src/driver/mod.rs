@@ -1,6 +1,7 @@
 //! [`LockDriver`], which keeps the locks a [`LockClient`](crate::LockClient) took.
 
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinError;
@@ -27,17 +28,32 @@ mod kept;
 pub struct LockDriver<P> {
     provider: Arc<P>,
     messages: mpsc::UnboundedReceiver<Message>,
+    /// Set once it stops, so no lock is taken from then on.
+    stopping: Arc<AtomicBool>,
 }
 
 impl<P: LockProvider> LockDriver<P> {
     /// A driver over `provider`, and the [`Driver`] to tell it what to keep through.
     pub(crate) fn new(provider: Arc<P>) -> (Self, Driver) {
         let (sender, messages) = mpsc::unbounded_channel();
-        (Self { provider, messages }, Driver(sender))
+        let stopping = Arc::new(AtomicBool::new(false));
+        let driver = Driver {
+            sender,
+            stopping: stopping.clone(),
+        };
+        let lock_driver = Self {
+            provider,
+            messages,
+            stopping,
+        };
+        (lock_driver, driver)
     }
 
     /// Keeps the locks until `cancel`, then cancels every guard's
-    /// [`lost`](crate::LockGuard::lost), lets go of every lock still held, and ends.
+    /// [`lost`](crate::LockGuard::lost), lets go of each lock once its guard is dropped or
+    /// released, or not at all once it may have expired, and ends.
+    ///
+    /// So it ends as soon as the work it guards does, and at the latest a `ttl` after.
     ///
     /// Locks taken before it starts are kept too. Dropping it, run or not, cancels the guards'
     /// `lost` as well, but leaves their locks to expire.
@@ -64,14 +80,28 @@ impl<P: LockProvider> LockDriver<P> {
             }
         }
 
-        // Closed first, so a lock taken from now on is let go by its taker. Every lost is
-        // cancelled before any unlock is waited on, and the extends still out are dropped.
-        self.messages.close();
-        driving.extending.abort_all();
+        // Stopping first, so a lock taken from now on is let go by its taker. Every lost is
+        // cancelled at once, but each lock is let go only once its holder stops, so another
+        // can't take it meanwhile.
+        self.stopping.store(true, Ordering::SeqCst);
+        driving.stop();
+        // The locks taken before then, too.
         while let Ok(message) = self.messages.try_recv() {
             driving.handle(message);
         }
-        driving.let_all_go();
+        while driving.holding() {
+            let due = driving.due();
+            tokio::select! {
+                biased;
+                () = sleep_until(due) => driving.give_up_late(Instant::now()),
+                Some(message) = self.messages.recv() => driving.handle(message),
+                Some(reply) = driving.unlocking.join_next() => joined(reply).answer(),
+            }
+        }
+        self.messages.close();
+        while let Ok(message) = self.messages.try_recv() {
+            driving.handle(message);
+        }
         while let Some(reply) = driving.unlocking.join_next().await {
             joined(reply).answer();
         }
@@ -80,31 +110,37 @@ impl<P: LockProvider> LockDriver<P> {
 
 /// How a [`LockClient`](crate::LockClient) and its guards tell the [`LockDriver`] what to keep.
 #[derive(Clone, Debug)]
-pub(crate) struct Driver(mpsc::UnboundedSender<Message>);
+pub(crate) struct Driver {
+    sender: mpsc::UnboundedSender<Message>,
+    stopping: Arc<AtomicBool>,
+}
 
 impl Driver {
-    /// Whether the driver has stopped or been dropped.
+    /// Whether the driver is stopping, has stopped, or has been dropped.
     pub(crate) fn is_stopped(&self) -> bool {
-        self.0.is_closed()
+        self.stopping.load(Ordering::SeqCst) || self.sender.is_closed()
     }
 
     /// Has the driver keep `lease`, taken by a request sent at `taken_at`, and cancel `lost` once
     /// it is lost.
     ///
-    /// True when the driver will keep it. False when the driver has stopped, so nothing will
-    /// extend the lease or let it go, and the caller lets it go itself.
+    /// True when the driver will keep it. False when the driver is stopping or has stopped, so
+    /// nothing will extend the lease or let it go, and the caller lets it go itself.
     pub(crate) fn held(&self, lease: Lease, lost: CancelToken, taken_at: Instant) -> bool {
+        if self.is_stopped() {
+            return false;
+        }
         let kept = Kept::new(lease, lost, taken_at);
-        self.0.send(Message::Held(kept)).is_ok()
+        self.sender.send(Message::Held(kept)).is_ok()
     }
 
     /// Has the driver let `lease` go, waiting until the store has.
     ///
-    /// A driver that has ended is not an error, having let go of it as it stopped, or left it to
-    /// expire.
+    /// A driver that has ended is not an error, having ended once the lease may have expired, or
+    /// left it to expire.
     pub(crate) async fn release(&self, lease: Lease) -> PortResult<()> {
         let (done, released) = oneshot::channel();
-        if self.0.send(Message::Release { lease, done }).is_err() {
+        if self.sender.send(Message::Release { lease, done }).is_err() {
             return Ok(());
         }
         match released.await {
@@ -116,8 +152,8 @@ impl Driver {
 
     /// Has the driver let `lease` go soon, without waiting.
     pub(crate) fn dropped(&self, lease: Lease) {
-        // A driver that has ended let go of it as it stopped, or left it to expire.
-        self.0.send(Message::Dropped { lease }).ok();
+        // A driver that has ended did so once the lease may have expired, or left it to expire.
+        self.sender.send(Message::Dropped { lease }).ok();
     }
 }
 

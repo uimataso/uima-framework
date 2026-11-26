@@ -20,6 +20,8 @@ use crate::{Extended, Lease, LockProvider};
 pub(super) struct Driving<P> {
     provider: Arc<P>,
     kept: HashMap<Uuid, Kept>,
+    /// Once stopping, when each lock not yet let go may expire.
+    stopping: Option<HashMap<Uuid, Instant>>,
     pub(super) extending: JoinSet<ExtendReply>,
     pub(super) unlocking: JoinSet<UnlockReply>,
 }
@@ -29,6 +31,7 @@ impl<P: LockProvider> Driving<P> {
         Self {
             provider,
             kept: HashMap::new(),
+            stopping: None,
             extending: JoinSet::new(),
             unlocking: JoinSet::new(),
         }
@@ -36,42 +39,51 @@ impl<P: LockProvider> Driving<P> {
 
     /// When something is next due, if anything is.
     pub(super) fn due(&self) -> Option<Instant> {
-        self.kept.values().map(Kept::due).min()
+        match &self.stopping {
+            Some(stopping) => stopping.values().min().copied(),
+            None => self.kept.values().map(Kept::due).min(),
+        }
     }
 
     pub(super) fn handle(&mut self, message: Message) {
         match message {
-            Message::Held(kept) => {
-                self.kept.insert(kept.lease.token, kept);
-            }
+            Message::Held(kept) => match &mut self.stopping {
+                // Taken as the driver stopped, so lost at once, as `kept` is dropped.
+                Some(stopping) => {
+                    stopping.insert(kept.lease.token, kept.expires());
+                }
+                None => {
+                    self.kept.insert(kept.lease.token, kept);
+                }
+            },
             Message::Release { lease, done } => {
-                self.kept.remove(&lease.token);
-                let wait = lease.ttl.get();
+                let wait = self.forget(&lease);
                 self.unlock(lease, wait, Some(done));
             }
             Message::Dropped { lease } => {
-                self.kept.remove(&lease.token);
-                let wait = lease.ttl.get();
+                let wait = self.forget(&lease);
                 self.unlock(lease, wait, None);
             }
         }
     }
 
-    /// Gives up on the leases not extended in time, letting them go in case the store still
-    /// holds them.
+    /// Gives up on the leases not extended in time, or once stopping, on those that may have
+    /// expired.
+    ///
+    /// A lease given up on is let go only once its guard is, so another can't take it while
+    /// its holder stops.
     pub(super) fn give_up_late(&mut self, now: Instant) {
-        let late: Vec<Uuid> = self
-            .kept
-            .values()
-            .filter(|kept| kept.deadline() <= now)
-            .map(|kept| kept.lease.token)
-            .collect();
-        for token in late {
-            if let Some(kept) = self.kept.remove(&token) {
-                warn!(key = kept.lease.key, "lost a lock not extended in time");
-                self.unlock(kept.lease.clone(), kept.lease.ttl.get(), None);
-            }
+        if let Some(stopping) = &mut self.stopping {
+            stopping.retain(|_, expires| *expires > now);
+            return;
         }
+        self.kept.retain(|_, kept| {
+            let late = kept.deadline() <= now;
+            if late {
+                warn!(key = kept.lease.key, "lost a lock not extended in time");
+            }
+            !late
+        });
     }
 
     /// Sends one extend of the leases due and not being extended already.
@@ -143,14 +155,37 @@ impl<P: LockProvider> Driving<P> {
         }
     }
 
-    /// Stops keeping every lock, cancelling their `lost`, and lets them go, giving up on each
-    /// once the store may have expired it.
-    pub(super) fn let_all_go(&mut self) {
-        let now = Instant::now();
-        let kept: Vec<Kept> = self.kept.drain().map(|(_, kept)| kept).collect();
-        for kept in kept {
-            let wait = kept.expires().saturating_duration_since(now);
-            self.unlock(kept.lease.clone(), wait, None);
+    /// Stops keeping every lock, cancelling their `lost`, and drops the extends still out.
+    ///
+    /// Each lock is let go once its guard is, until it may have expired.
+    pub(super) fn stop(&mut self) {
+        self.extending.abort_all();
+        let stopping = self.kept.drain();
+        self.stopping = Some(
+            stopping
+                .map(|(token, kept)| (token, kept.expires()))
+                .collect(),
+        );
+    }
+
+    /// Whether, once stopping, a lock is still waiting for its guard.
+    pub(super) fn holding(&self) -> bool {
+        self.stopping
+            .as_ref()
+            .is_some_and(|stopping| !stopping.is_empty())
+    }
+
+    /// Stops keeping `lease`, giving how long to wait on letting it go: until it may have
+    /// expired once stopping, or its ttl.
+    fn forget(&mut self, lease: &Lease) -> Duration {
+        self.kept.remove(&lease.token);
+        let expires = self
+            .stopping
+            .as_mut()
+            .and_then(|stopping| stopping.remove(&lease.token));
+        match expires {
+            Some(expires) => expires.saturating_duration_since(Instant::now()),
+            None => lease.ttl.get(),
         }
     }
 

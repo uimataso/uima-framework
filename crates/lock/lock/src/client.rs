@@ -125,7 +125,8 @@ impl LockGuard {
     /// Lets the lock go, waiting until the store has.
     ///
     /// A lock already lost is not an error, nor is one whose driver has ended. A driver stopped by
-    /// its `cancel` let go of every lock as it did; one dropped left them to expire.
+    /// its `cancel` ends once every lock is let go or may have expired; one dropped leaves them to
+    /// expire.
     pub async fn release(mut self) -> PortResult<()> {
         let Some(lease) = self.lease.take() else {
             return Ok(());
