@@ -376,6 +376,19 @@ async fn a_lock_taken_as_the_driver_stops_is_let_go() {
 }
 
 #[tokio::test(start_paused = true)]
+async fn a_lock_taken_as_the_driver_stops_fails_within_its_ttl_however_slow_the_unlock() {
+    let store = Faulty::default();
+    let (client, cancel, _driving) = start(&store);
+    *store.on_acquire.lock().unwrap() = Some(cancel);
+    store.reply_in(Duration::from_millis(1));
+    *store.unlocks_take.lock().unwrap() = GIVE_UP;
+
+    let locked = tokio::time::timeout(TTL.get() * 2, client.try_lock("purge", TTL)).await;
+
+    assert!(let Ok(Err(_)) = locked);
+}
+
+#[tokio::test(start_paused = true)]
 async fn stopping_with_a_slow_store_cancels_every_lost_at_once() {
     let store = Faulty::default();
     let (client, cancel, driving) = start(&store);

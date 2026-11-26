@@ -10,6 +10,7 @@ use uima_core::PortResult;
 
 use crate::{Lease, LockProvider};
 use driving::Driving;
+pub(crate) use driving::let_go;
 pub(crate) use kept::Kept;
 
 mod driving;

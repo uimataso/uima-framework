@@ -182,13 +182,19 @@ impl UnlockReply {
     }
 }
 
-/// Lets `lease` go, giving up after its ttl, when it has expired anyway.
+/// Lets `lease` go, giving up after its ttl.
 async fn unlock<P: LockProvider>(
     provider: Arc<P>,
     lease: Lease,
     done: Option<oneshot::Sender<PortResult<()>>>,
 ) -> UnlockReply {
-    let result = within(lease.ttl.get(), provider.unlock(&lease)).await;
+    let result = let_go(&*provider, &lease).await;
+    UnlockReply { result, done }
+}
+
+/// Lets `lease` go, giving up after its ttl, when it has expired anyway.
+pub(crate) async fn let_go(provider: &impl LockProvider, lease: &Lease) -> PortResult<()> {
+    let result = within(lease.ttl.get(), provider.unlock(lease)).await;
     if let Err(error) = &result {
         warn!(
             key = lease.key,
@@ -196,7 +202,7 @@ async fn unlock<P: LockProvider>(
             "failed to let a lock go"
         );
     }
-    UnlockReply { result, done }
+    result
 }
 
 /// What `call` gives, or a timeout failure once `wait` has passed.

@@ -7,7 +7,7 @@ use tokio::time::Instant;
 use uima_cancel::CancelToken;
 use uima_core::{Failure, FailureKind, PortResult};
 
-use crate::driver::{Driver, Kept, LockDriver};
+use crate::driver::{self, Driver, Kept, LockDriver};
 use crate::{Lease, LockProvider, TryAcquire, Ttl};
 
 /// The port use cases take locks through.
@@ -88,7 +88,7 @@ impl<P: LockProvider> Lock for LockClient<P> {
             // The driver stopped while the lease was being taken, after the check at the start.
             // Nothing would extend the lease or let it go, so it would keep the key from everyone
             // until its ttl ends; let it go here instead.
-            self.provider.unlock(&lease).await?;
+            driver::let_go(&*self.provider, &lease).await?;
             return failed(FailureKind::Unavailable, stopped);
         }
 
