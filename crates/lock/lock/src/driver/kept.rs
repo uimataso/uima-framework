@@ -28,6 +28,8 @@ impl Kept {
     pub(super) const WAITS_PER_TTL: u32 = 6;
     /// How many times a lease is extended per `ttl`.
     const EXTENDS_PER_TTL: u32 = 3;
+    /// How early, per `ttl`, a lease is extended along with another that is due.
+    const EARLY_PER_TTL: u32 = 6;
     /// How many times a lease is retried per `ttl` after a failed extend.
     const RETRIES_PER_TTL: u32 = 10;
 
@@ -65,6 +67,13 @@ impl Kept {
     /// it, or after the extend out is given up on, as that may extend it too.
     pub(super) fn expires(&self) -> Instant {
         self.extending.unwrap_or(self.answered_at) + self.lease.ttl.get()
+    }
+
+    /// Whether it is to be extended at `now`: it is due, or due soon enough to go along with
+    /// another, and no extend of it is out.
+    pub(super) fn is_due_soon(&self, now: Instant) -> bool {
+        let early = self.lease.ttl.get() / Self::EARLY_PER_TTL;
+        !self.is_extending() && self.next_extend <= now + early
     }
 
     /// Whether an extend of it is out.

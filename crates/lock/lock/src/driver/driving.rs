@@ -106,13 +106,14 @@ impl<P: LockProvider> Driving<P> {
         });
     }
 
-    /// Sends one extend of the leases due and not being extended already.
+    /// Sends one extend of the leases due and not being extended already, along with those due
+    /// soon, so locks taken apart share one.
     pub(super) fn extend_due(&mut self, now: Instant) {
         let mut due: Vec<&mut Kept> = self
             .leases
             .values_mut()
             .filter_map(|leased| match leased {
-                Leased::Kept(kept) if !kept.is_extending() && kept.next_extend <= now => Some(kept),
+                Leased::Kept(kept) if kept.is_due_soon(now) => Some(kept),
                 _ => None,
             })
             .collect();

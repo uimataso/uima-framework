@@ -44,6 +44,8 @@ struct Faulty {
     unlocks_take: Arc<Mutex<Duration>>,
     /// When the last extend that held its leases was sent.
     last_extended: Arc<Mutex<Option<Instant>>>,
+    /// The keys of each extend that reached the store.
+    extends: Arc<Mutex<Vec<Vec<String>>>>,
     acquire_fails: Arc<AtomicBool>,
     unlock_fails: Arc<AtomicBool>,
     /// Cancelled as a lock is taken, to stop the driver then.
@@ -83,6 +85,8 @@ impl LockProvider for Faulty {
     async fn extend(&self, leases: &[Lease]) -> PortResult<Vec<Extended>> {
         let landing = *self.extends_land_in.lock().unwrap();
         tokio::time::sleep(landing).await;
+        let keys = leases.iter().map(|lease| lease.key.clone()).collect();
+        self.extends.lock().unwrap().push(keys);
         let extending = *self.extending.lock().unwrap();
         let extended = match extending {
             Extending::Works => {
@@ -703,6 +707,54 @@ async fn release_of_a_lost_lock_is_not_an_error() {
     guard.lost().cancelled().await;
 
     assert!(let Ok(()) = guard.release().await);
+}
+
+#[tokio::test(start_paused = true)]
+async fn locks_taken_apart_are_extended_together() {
+    let store = Faulty::default();
+    let (client, _cancel, _driving) = start(&store);
+    let _first = lock(&client, "purge").await;
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    let _second = lock(&client, "report").await;
+
+    tokio::time::sleep(TTL.get() * 3).await;
+
+    let extends = store.extends.lock().unwrap().clone();
+    check!(!extends.is_empty());
+    check!(
+        extends.iter().all(|keys| keys.len() == 2),
+        "in one call to the store"
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_lock_of_a_longer_ttl_is_extended_along_with_a_shorter_one() {
+    let store = Faulty::default();
+    let (client, _cancel, _driving) = start(&store);
+    let short = lock(&client, "purge").await;
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    let TryLock::Locked(long) = client.try_lock("report", Ttl::from_secs(30)).await.unwrap() else {
+        panic!("report is busy")
+    };
+
+    tokio::time::sleep(Duration::from_secs(60)).await;
+
+    let extends = store.extends.lock().unwrap().clone();
+    check!(
+        extends
+            .iter()
+            .all(|keys| keys.contains(&"purge".to_owned())),
+        "so it takes no call of its own"
+    );
+    let longer = extends
+        .iter()
+        .filter(|keys| keys.contains(&"report".to_owned()));
+    check!(
+        longer.count() <= 60 / 5 + 1,
+        "nor is extended more than twice as often as it would be on its own"
+    );
+    check!(!short.lost().is_cancelled());
+    check!(!long.lost().is_cancelled());
 }
 
 #[tokio::test(start_paused = true)]
