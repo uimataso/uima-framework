@@ -7,7 +7,7 @@ use tokio::time::Instant;
 use uima_cancel::CancelToken;
 use uima_core::{Failure, FailureKind, PortResult};
 
-use crate::driver::{self, Driver, Kept, LockDriver};
+use crate::driver::{self, Kept, LockDriver, ToDriver};
 use crate::{Lease, LockProvider, TryAcquire, Ttl};
 
 /// The port use cases take locks through.
@@ -48,7 +48,7 @@ pub fn new<P: LockProvider>(provider: P) -> (LockClient<P>, LockDriver<P>) {
 /// Cloning it is cheap, and every clone shares one [`LockDriver`].
 pub struct LockClient<P> {
     provider: Arc<P>,
-    driver: Driver,
+    driver: ToDriver,
 }
 
 impl<P> Clone for LockClient<P> {
@@ -84,7 +84,7 @@ impl<P: LockProvider> Lock for LockClient<P> {
                 FailureKind::Timeout,
                 "the store answered too slowly to keep it",
             )
-        } else if !self.driver.held(lease.clone(), lost.clone(), taken_at) {
+        } else if !self.driver.keep(lease.clone(), lost.clone(), taken_at) {
             // The driver stopped while the lease was being taken, after the check at the start.
             failed(FailureKind::Unavailable, "the lock driver has stopped")
         } else {
@@ -113,7 +113,7 @@ pub struct LockGuard {
     /// Taken by `release`, so dropping it after sends nothing.
     lease: Option<Lease>,
     lost: CancelToken,
-    driver: Driver,
+    driver: ToDriver,
 }
 
 impl LockGuard {

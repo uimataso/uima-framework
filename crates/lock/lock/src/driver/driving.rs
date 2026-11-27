@@ -61,7 +61,7 @@ impl<P: LockProvider> Driving<P> {
 
     pub(super) fn handle(&mut self, message: Message) {
         match message {
-            Message::Held(kept) => {
+            Message::Keep(kept) => {
                 let token = kept.lease.token;
                 let leased = if self.stopping {
                     // Taken as the driver stopped, so lost at once, as `kept` is dropped.

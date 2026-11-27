@@ -33,11 +33,11 @@ pub struct LockDriver<P> {
 }
 
 impl<P: LockProvider> LockDriver<P> {
-    /// A driver over `provider`, and the [`Driver`] to tell it what to keep through.
-    pub(crate) fn new(provider: Arc<P>) -> (Self, Driver) {
+    /// A driver over `provider`, and the [`ToDriver`] to tell it what to keep through.
+    pub(crate) fn new(provider: Arc<P>) -> (Self, ToDriver) {
         let (sender, messages) = mpsc::unbounded_channel();
         let stopping = Arc::new(AtomicBool::new(false));
-        let driver = Driver {
+        let driver = ToDriver {
             sender,
             stopping: stopping.clone(),
         };
@@ -112,12 +112,12 @@ impl<P: LockProvider> LockDriver<P> {
 
 /// How a [`LockClient`](crate::LockClient) and its guards tell the [`LockDriver`] what to keep.
 #[derive(Clone, Debug)]
-pub(crate) struct Driver {
+pub(crate) struct ToDriver {
     sender: mpsc::UnboundedSender<Message>,
     stopping: Arc<AtomicBool>,
 }
 
-impl Driver {
+impl ToDriver {
     /// Whether the driver is stopping, has stopped, or has been dropped.
     pub(crate) fn is_stopped(&self) -> bool {
         self.stopping.load(Ordering::SeqCst) || self.sender.is_closed()
@@ -128,12 +128,12 @@ impl Driver {
     ///
     /// True when the driver will keep it. False when the driver is stopping or has stopped, so
     /// nothing will extend the lease or let it go, and the caller lets it go itself.
-    pub(crate) fn held(&self, lease: Lease, lost: CancelToken, taken_at: Instant) -> bool {
+    pub(crate) fn keep(&self, lease: Lease, lost: CancelToken, taken_at: Instant) -> bool {
         if self.is_stopped() {
             return false;
         }
         let kept = Kept::new(lease, lost, taken_at);
-        self.sender.send(Message::Held(kept)).is_ok()
+        self.sender.send(Message::Keep(kept)).is_ok()
     }
 
     /// Has the driver let `lease` go, waiting until the store has.
@@ -159,11 +159,11 @@ impl Driver {
     }
 }
 
-/// What a [`Driver`] sends.
+/// What a [`ToDriver`] sends.
 #[derive(Debug)]
 enum Message {
     /// A lock was taken; keep it alive. Dropped unread, as with the driver, it cancels `lost`.
-    Held(Kept),
+    Keep(Kept),
     /// Let the lock go; answer through `done` once the store has.
     Release {
         lease: Lease,
