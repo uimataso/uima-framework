@@ -66,9 +66,9 @@ impl<P: LockProvider> Lock for LockClient<P> {
             let failure = Failure::new(kind, anyhow::Error::msg(reason));
             Err(failure.context(format!("failed to lock {key}")).into())
         };
-        let stopped = "the lock driver has stopped";
+
         if self.driver.is_stopped() {
-            return failed(FailureKind::Unavailable, stopped);
+            return failed(FailureKind::Unavailable, "the lock driver has stopped");
         }
 
         let taken_at = Instant::now();
@@ -77,26 +77,28 @@ impl<P: LockProvider> Lock for LockClient<P> {
             TryAcquire::Busy => return Ok(TryLock::Busy),
         };
 
+        let too_slow = Instant::now() >= Kept::deadline_after(taken_at, lease.ttl.get());
         let lost = CancelToken::new();
-        let (kind, reason) = if Instant::now() >= Kept::deadline_after(taken_at, lease.ttl.get()) {
-            // Taken too slowly to keep, as it may be expiring already.
-            (
-                FailureKind::Timeout,
-                "the store answered too slowly to keep it",
-            )
-        } else if !self.driver.held(lease.clone(), lost.clone(), taken_at) {
-            // The driver stopped while the lease was being taken, after the check at the start.
-            (FailureKind::Unavailable, stopped)
-        } else {
+        if !too_slow && self.driver.held(lease.clone(), lost.clone(), taken_at) {
             return Ok(TryLock::Locked(LockGuard {
                 lease: Some(lease),
                 lost,
                 driver: self.driver.clone(),
             }));
-        };
-        // Nothing keeps the lease, so it would keep the key from everyone until its ttl ends.
+        }
+
+        // Taken too slowly to keep, as it may be expiring already, or the driver stopped while it
+        // was being taken, after the check at the start. Nothing keeps the lease, so it would keep
+        // the key from everyone until its ttl ends.
         driver::let_go(&*self.provider, &lease, lease.ttl.get()).await?;
-        failed(kind, reason)
+        if too_slow {
+            failed(
+                FailureKind::Timeout,
+                "the store answered too slowly to keep it",
+            )
+        } else {
+            failed(FailureKind::Unavailable, "the lock driver has stopped")
+        }
     }
 }
 
