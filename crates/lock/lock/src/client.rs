@@ -19,8 +19,9 @@ pub trait Lock: Send + Sync {
     /// A key this instance holds already is busy too.
     ///
     /// Fails when the store does, or answers too slowly to keep the lock, or once the
-    /// [`LockDriver`] has stopped or been dropped. One that fails or is cancelled may leave the
-    /// key held, with no guard, until `ttl` ends.
+    /// [`LockDriver`] has stopped or been dropped. One that fails once the store gave the lock
+    /// waits for the store to let it go, for `ttl` at most. One that fails or is cancelled may
+    /// leave the key held, with no guard, until `ttl` ends.
     fn try_lock(&self, key: &str, ttl: Ttl) -> impl Future<Output = PortResult<TryLock>> + Send;
 }
 
@@ -118,7 +119,7 @@ pub struct LockGuard {
 
 impl LockGuard {
     /// Cancelled once the lock is lost, as the [`LockDriver`] counts it, or the driver stops or is
-    /// dropped.
+    /// dropped. Also once the guard is released or dropped.
     ///
     /// The work it guards stops early once it is.
     pub fn lost(&self) -> &CancelToken {

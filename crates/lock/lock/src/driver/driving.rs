@@ -27,16 +27,6 @@ pub(super) struct Driving<P> {
     pub(super) unlocks: JoinSet<UnlockReply>,
 }
 
-/// A lock not yet let go.
-#[derive(Debug)]
-enum Leased {
-    /// Extended until its guard lets it go.
-    Kept(Kept),
-    /// Given up on, so no longer extended, but let go once its guard is, until it may have
-    /// expired, so another can't take it while its holder stops.
-    Unkept { expires: Instant },
-}
-
 impl<P: LockProvider> Driving<P> {
     pub(super) fn new(provider: Arc<P>) -> Self {
         Self {
@@ -184,6 +174,7 @@ impl<P: LockProvider> Driving<P> {
                     }
                 }
                 Extended::Lost => {
+                    // One let go while this extend was out is lost too, though not to another.
                     if self.kept(lease).is_some() {
                         self.leases.remove(&lease.token);
                         warn!(key = lease.key, "lost a lock taken by another");
@@ -194,8 +185,6 @@ impl<P: LockProvider> Driving<P> {
     }
 
     /// Stops keeping every lock, cancelling their `lost`, and drops the extends still out.
-    ///
-    /// Each lock is let go once its guard is, until it may have expired.
     pub(super) fn stop(&mut self) {
         self.stopping = true;
         self.extends.abort_all();
@@ -221,8 +210,8 @@ impl<P: LockProvider> Driving<P> {
         }
     }
 
-    /// Forgets `lease`, giving how long to wait on letting it go: until it may have expired.
-    /// None when there is nothing to let go.
+    /// Forgets `lease`, giving how long to wait on letting it go, which is until it may have
+    /// expired. None when there is nothing to let go.
     fn forget(&mut self, lease: &Lease) -> Option<Duration> {
         let expires = match self.leases.remove(&lease.token)? {
             Leased::Kept(kept) => kept.expires(),
@@ -243,6 +232,15 @@ impl<P: LockProvider> Driving<P> {
             UnlockReply { result, done }
         });
     }
+}
+
+/// A lock not yet let go.
+enum Leased {
+    /// Extended until its guard lets it go.
+    Kept(Kept),
+    /// Given up on, so no longer extended, but let go once its guard is, until it may have
+    /// expired, so another can't take it while its holder stops.
+    Unkept { expires: Instant },
 }
 
 /// What an extend sent at `sent` got for `leases`.

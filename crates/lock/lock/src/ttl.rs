@@ -24,7 +24,7 @@ use uima_core::{Invalid, Newtype};
 pub struct Ttl(Duration);
 
 impl Ttl {
-    /// Long enough to extend a lease, through a slow store, before most of it passes.
+    /// A second, long enough to extend a lease, through a slow store, before most of it passes.
     pub const MIN: Self = Self(Duration::from_secs(1));
     /// A year, so a lease's expiry can't overflow.
     pub const MAX: Self = Self(Duration::from_secs(365 * 24 * 60 * 60));

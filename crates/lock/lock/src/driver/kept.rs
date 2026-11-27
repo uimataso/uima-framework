@@ -17,11 +17,10 @@ use crate::{Lease, Ttl};
 ///
 /// Dropping it cancels `lost`, so a lock is lost once the driver stops keeping it, however that
 /// happens.
-#[derive(Debug)]
 pub(crate) struct Kept {
     pub(super) lease: Lease,
     lost: CancelToken,
-    pub(super) next_extend: Instant,
+    next_extend: Instant,
     /// When it counts as lost unless extended again.
     deadline: Instant,
     /// When the store may expire it, by this instance's clock.
@@ -72,8 +71,8 @@ impl Kept {
         self.deadline
     }
 
-    /// When the store may expire it, by this instance's clock: a ttl after it last answered for
-    /// it, or after the extend out is given up on, as that may extend it too.
+    /// When the store may expire it, by this instance's clock, which is a ttl after it last
+    /// answered for it, or after the extend out is given up on, as that may extend it too.
     ///
     /// An extend the store does only after it is given up on, as over a hung connection, keeps
     /// it longer.
@@ -81,16 +80,11 @@ impl Kept {
         self.expires
     }
 
-    /// Whether it is to be extended at `now`: it is due, or due soon enough to go along with
-    /// another, and no extend of it is out.
+    /// Whether it is to be extended at `now`, being due, or due soon enough to go along with
+    /// another, with no extend of it out.
     pub(super) fn is_due_soon(&self, now: Instant) -> bool {
         let early = self.lease.ttl.get() / Self::EARLY_PER_TTL;
-        !self.is_extending() && self.next_extend <= now + early
-    }
-
-    /// Whether an extend of it is out.
-    pub(super) fn is_extending(&self) -> bool {
-        self.extending
+        !self.extending && self.next_extend <= now + early
     }
 
     /// Notes an extend of it is out, waited for until `until`, so the store may keep it until a
@@ -115,7 +109,7 @@ impl Kept {
     /// When it is next due, to be extended or given up on. While it is being extended, only
     /// the latter.
     pub(super) fn due(&self) -> Instant {
-        if self.is_extending() {
+        if self.extending {
             self.deadline()
         } else {
             self.next_extend.min(self.deadline())

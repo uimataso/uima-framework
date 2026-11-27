@@ -11,7 +11,7 @@ use uima_testing::{assert, check, run_case};
 use super::*;
 
 /// The `ttl` the cases take locks for.
-pub const TTL: Ttl = Ttl::MIN;
+const TTL: Ttl = Ttl::MIN;
 
 /// Long enough after [`TTL`] that a lease taken for it has expired.
 const EXPIRED: Duration = Duration::from_millis(1500);
@@ -27,6 +27,7 @@ pub async fn run_all<P: LockProvider>(isolated: impl AsyncFn() -> P) {
     run_case(&isolated, a_ttl_is_not_rounded_to_whole_seconds).await;
     run_case(&isolated, extend_keeps_a_lease_past_its_ttl).await;
     run_case(&isolated, an_extended_lease_expires_a_ttl_after_the_extend).await;
+    run_case(&isolated, extends_at_once_keep_a_lease_for_one_ttl).await;
     run_case(&isolated, extend_keeps_each_lease_for_its_own_ttl).await;
     run_case(&isolated, extend_tells_each_lease_in_order).await;
     run_case(&isolated, extend_after_unlock_is_lost).await;
@@ -95,18 +96,17 @@ pub async fn an_expired_lease_can_be_taken(provider: &impl LockProvider) -> anyh
 pub async fn a_ttl_is_not_rounded_to_whole_seconds(
     provider: &impl LockProvider,
 ) -> anyhow::Result<()> {
-    let ttl = Ttl::new(Duration::from_millis(1500))?;
+    let ttl = Ttl::new(Duration::from_millis(2500))?;
     // Past its whole seconds, but not its ttl.
-    let past_whole_seconds = Duration::from_millis(1200);
+    let past_whole_seconds = Duration::from_millis(2200);
     let key = key();
     let lease = acquire(provider, &key, ttl).await?;
     tokio::time::sleep(past_whole_seconds).await;
     check!(
-        provider.try_acquire(&key, TTL).await? == TryAcquire::Busy,
-        "taken"
+        provider.extend(std::slice::from_ref(&lease)).await? == [Extended::Held],
+        "as taken"
     );
 
-    check!(provider.extend(std::slice::from_ref(&lease)).await? == [Extended::Held]);
     tokio::time::sleep(past_whole_seconds).await;
     check!(
         provider.try_acquire(&key, TTL).await? == TryAcquire::Busy,
@@ -134,6 +134,21 @@ pub async fn an_extended_lease_expires_a_ttl_after_the_extend(
     let lease = acquire(provider, &key, TTL).await?;
     tokio::time::sleep(TTL.get() / 2).await;
     check!(provider.extend(std::slice::from_ref(&lease)).await? == [Extended::Held]);
+
+    tokio::time::sleep(EXPIRED).await;
+
+    acquire(provider, &key, TTL).await?;
+    Ok(())
+}
+
+pub async fn extends_at_once_keep_a_lease_for_one_ttl(
+    provider: &impl LockProvider,
+) -> anyhow::Result<()> {
+    let key = key();
+    let lease = acquire(provider, &key, TTL).await?;
+    let extend = || provider.extend(std::slice::from_ref(&lease));
+    let extended = tokio::join!(extend(), extend(), extend());
+    check!([extended.0?, extended.1?, extended.2?].concat() == [Extended::Held; 3]);
 
     tokio::time::sleep(EXPIRED).await;
 

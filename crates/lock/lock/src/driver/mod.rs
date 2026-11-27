@@ -54,20 +54,25 @@ impl<P: LockProvider> LockDriver<P> {
     /// released, or not at all once it may have expired, and ends.
     ///
     /// So it ends as soon as the work it guards does, and at the latest once every lock may have
-    /// expired: a `ttl` after, or a sixth of it more for one being extended as it stops.
+    /// expired, a `ttl` after, or a sixth of it more for one being extended as it stops. A lock
+    /// taken at the moment it ends may still be given, lost at once and left to expire.
     ///
-    /// Locks taken before it starts are kept too. Dropping it, run or not, cancels the guards'
-    /// `lost` as well, but leaves their locks to expire.
+    /// Locks taken before it starts are kept too, when it starts within four fifths of their
+    /// `ttl`. Until it starts, nothing cancels their `lost`, and a `release` waits. Dropping it,
+    /// run or not, cancels the guards' `lost` as well, but leaves their locks to expire.
     pub async fn run(mut self, cancel: CancelToken) {
         let mut driving = Driving::new(self.provider);
 
         loop {
             let due = driving.due();
             tokio::select! {
-                // Cancel first, so the driver stops however busy it is, then what is due, so a
-                // lease is given up on in time however many messages and replies come in.
+                // Cancel first, so the driver stops however busy it is. Then the extends
+                // answered, so a driver that ran late doesn't give up on a lease the store
+                // extended in time. Then what is due, so a lease is given up on in time however
+                // many messages come in.
                 biased;
                 () = cancel.cancelled() => break,
+                Some(reply) = driving.extends.join_next() => driving.on_extend_reply(joined(reply)),
                 () = sleep_until(due) => {
                     let now = Instant::now();
                     driving.give_up_late(now);
@@ -76,14 +81,13 @@ impl<P: LockProvider> LockDriver<P> {
                 // None once every client and guard is gone, which skips it only this time
                 // round, so the driver still runs until cancelled.
                 Some(message) = self.messages.recv() => driving.handle(message),
-                Some(reply) = driving.extends.join_next() => driving.on_extend_reply(joined(reply)),
                 Some(reply) = driving.unlocks.join_next() => joined(reply).answer(),
             }
         }
 
         // Stopping first, so a lock taken from now on is let go by its taker. Every lost is
         // cancelled at once, but each lock is let go only once its holder stops, so another
-        // can't take it meanwhile.
+        // can't take it meanwhile, until it may have expired.
         self.stopping.store(true, Ordering::SeqCst);
         driving.stop();
         // The locks taken before then, too.
@@ -100,8 +104,10 @@ impl<P: LockProvider> LockDriver<P> {
             }
         }
 
-        // What was sent as the last lock was let go. A lock among them, taken by a client that
-        // checked just before the driver stopped, is lost at once and left to expire.
+        // Closed before the unlocks still out are waited for, so a release from now on returns at
+        // once. What was sent as the last lock was let go is handled first. A lock among them,
+        // taken by a client that checked just before the driver stopped, is lost at once and left
+        // to expire.
         self.messages.close();
         while let Ok(message) = self.messages.try_recv() {
             driving.handle(message);
@@ -140,8 +146,7 @@ impl ToDriver {
 
     /// Has the driver let `lease` go, waiting until the store has.
     ///
-    /// A driver that has ended is not an error, having ended once the lease may have expired, or
-    /// left it to expire.
+    /// A driver that has ended is not an error.
     pub(crate) async fn release(&self, lease: Lease) -> PortResult<()> {
         let (done, released) = oneshot::channel();
         if self.sender.send(Message::Release { lease, done }).is_err() {
@@ -162,7 +167,6 @@ impl ToDriver {
 }
 
 /// What a [`ToDriver`] sends.
-#[derive(Debug)]
 enum Message {
     /// A lock was taken; keep it alive. Dropped unread, as with the driver, it cancels `lost`.
     Keep(Kept),
