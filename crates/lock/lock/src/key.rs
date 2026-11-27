@@ -52,7 +52,9 @@ impl LockKey {
     pub const fn from_static(key: &'static str) -> Self {
         match Self::check(key) {
             Ok(()) => Self(Cow::Borrowed(key)),
-            Err(_) => panic!("a lock's key must be a DNS label of 1 to 63 of a-z, 0-9 and -"),
+            Err(_) => panic!(
+                "a lock's key must be 1 to 63 of a-z, 0-9 and -, starting and ending with a letter or digit"
+            ),
         }
     }
 

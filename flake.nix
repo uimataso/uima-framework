@@ -44,6 +44,11 @@
           inherit self system;
           name = "uima-framework";
           root = ./.;
+          # `sqlx::migrate!` reads these at compile time.
+          extraSrc = [
+            ./crates/lock/postgres-sqlx/migrations
+            ./crates/lock/postgres-sqlx/testdata
+          ];
           devPackages = pkgs: [ pkgs.cargo-mutants ];
         };
         pkgs = nixpkgs.legacyPackages.${system};
