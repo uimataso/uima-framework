@@ -23,8 +23,8 @@ pub(super) struct Driving<P> {
     leases: HashMap<Uuid, Leased>,
     /// Whether the driver is stopping, so it keeps no lock.
     stopping: bool,
-    pub(super) extending: JoinSet<ExtendReply>,
-    pub(super) unlocking: JoinSet<UnlockReply>,
+    pub(super) extends: JoinSet<ExtendReply>,
+    pub(super) unlocks: JoinSet<UnlockReply>,
 }
 
 /// A lock not yet let go.
@@ -43,8 +43,8 @@ impl<P: LockProvider> Driving<P> {
             provider,
             leases: HashMap::new(),
             stopping: false,
-            extending: JoinSet::new(),
-            unlocking: JoinSet::new(),
+            extends: JoinSet::new(),
+            unlocks: JoinSet::new(),
         }
     }
 
@@ -133,7 +133,7 @@ impl<P: LockProvider> Driving<P> {
             .collect();
 
         let provider = self.provider.clone();
-        self.extending.spawn(async move {
+        self.extends.spawn(async move {
             let result = within(wait, provider.extend(&due)).await;
             ExtendReply {
                 sent: now,
@@ -147,7 +147,7 @@ impl<P: LockProvider> Driving<P> {
     ///
     /// An answer for another number of leases than were sent fails, as it can't tell which is
     /// which.
-    pub(super) fn extended(&mut self, reply: ExtendReply) {
+    pub(super) fn on_extend_reply(&mut self, reply: ExtendReply) {
         for lease in &reply.leases {
             if let Some(kept) = self.kept(lease) {
                 kept.answered();
@@ -198,7 +198,7 @@ impl<P: LockProvider> Driving<P> {
     /// Each lock is let go once its guard is, until it may have expired.
     pub(super) fn stop(&mut self) {
         self.stopping = true;
-        self.extending.abort_all();
+        self.extends.abort_all();
         for leased in self.leases.values_mut() {
             if let Leased::Kept(kept) = leased {
                 *leased = Leased::Unkept {
@@ -238,7 +238,7 @@ impl<P: LockProvider> Driving<P> {
         done: Option<oneshot::Sender<PortResult<()>>>,
     ) {
         let provider = self.provider.clone();
-        self.unlocking.spawn(async move {
+        self.unlocks.spawn(async move {
             let result = let_go(&*provider, &lease, wait).await;
             UnlockReply { result, done }
         });

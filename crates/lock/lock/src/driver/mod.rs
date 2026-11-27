@@ -76,8 +76,8 @@ impl<P: LockProvider> LockDriver<P> {
                 // None once every client and guard is gone, which skips it only this time
                 // round, so the driver still runs until cancelled.
                 Some(message) = self.messages.recv() => driving.handle(message),
-                Some(reply) = driving.extending.join_next() => driving.extended(joined(reply)),
-                Some(reply) = driving.unlocking.join_next() => joined(reply).answer(),
+                Some(reply) = driving.extends.join_next() => driving.on_extend_reply(joined(reply)),
+                Some(reply) = driving.unlocks.join_next() => joined(reply).answer(),
             }
         }
 
@@ -96,7 +96,7 @@ impl<P: LockProvider> LockDriver<P> {
                 biased;
                 () = sleep_until(due) => driving.give_up_late(Instant::now()),
                 Some(message) = self.messages.recv() => driving.handle(message),
-                Some(reply) = driving.unlocking.join_next() => joined(reply).answer(),
+                Some(reply) = driving.unlocks.join_next() => joined(reply).answer(),
             }
         }
 
@@ -106,7 +106,7 @@ impl<P: LockProvider> LockDriver<P> {
         while let Ok(message) = self.messages.try_recv() {
             driving.handle(message);
         }
-        while let Some(reply) = driving.unlocking.join_next().await {
+        while let Some(reply) = driving.unlocks.join_next().await {
             joined(reply).answer();
         }
     }
