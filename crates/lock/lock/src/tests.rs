@@ -36,6 +36,8 @@ struct Faulty {
     extending: Arc<Mutex<Extending>>,
     /// How long a reply to each call takes, after the store has done it.
     replies_in: Arc<Mutex<Duration>>,
+    /// How long an acquire takes to reach the store.
+    acquires_land_in: Arc<Mutex<Duration>>,
     /// How long an extend takes to reach the store.
     extends_land_in: Arc<Mutex<Duration>>,
     /// How much longer an extend's reply takes.
@@ -69,6 +71,8 @@ impl Faulty {
 
 impl LockProvider for Faulty {
     async fn try_acquire(&self, key: &str, ttl: Ttl) -> PortResult<TryAcquire> {
+        let landing = *self.acquires_land_in.lock().unwrap();
+        tokio::time::sleep(landing).await;
         let acquired = if self.acquire_fails.load(Ordering::SeqCst) {
             Err(down())
         } else {
@@ -588,6 +592,26 @@ async fn stopping_with_a_lock_being_extended_ends_a_sixth_of_its_ttl_later() {
         .unwrap();
 
     check!(Instant::now() <= cancelled + TTL.get() + TTL.get() / 6);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_lock_taken_slowly_is_let_go_once_dropped_after_the_driver_stops() {
+    let store = Faulty::default();
+    let (client, cancel, driving) = start(&store);
+    *store.acquires_land_in.lock().unwrap() = TTL.get() / 3;
+    let guard = lock(&client, "purge").await;
+
+    cancel.cancel();
+    settle().await;
+    // Past when it would expire had the store taken it as asked.
+    tokio::time::sleep(TTL.get() - Duration::from_millis(100)).await;
+    drop(guard);
+    tokio::time::timeout(GIVE_UP, driving)
+        .await
+        .unwrap()
+        .unwrap();
+
+    check!(!held(&store, "purge").await);
 }
 
 #[tokio::test(start_paused = true)]
