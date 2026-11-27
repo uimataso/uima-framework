@@ -53,7 +53,8 @@ impl<P: LockProvider> LockDriver<P> {
     /// [`lost`](crate::LockGuard::lost), lets go of each lock once its guard is dropped or
     /// released, or not at all once it may have expired, and ends.
     ///
-    /// So it ends as soon as the work it guards does, and at the latest a `ttl` after.
+    /// So it ends as soon as the work it guards does, and at the latest once every lock may have
+    /// expired: a `ttl` after, or a sixth of it more for one being extended as it stops.
     ///
     /// Locks taken before it starts are kept too. Dropping it, run or not, cancels the guards'
     /// `lost` as well, but leaves their locks to expire.

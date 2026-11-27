@@ -573,6 +573,24 @@ async fn a_lock_kept_a_while_is_let_go_once_dropped_after_the_driver_stops() {
 }
 
 #[tokio::test(start_paused = true)]
+async fn stopping_with_a_lock_being_extended_ends_a_sixth_of_its_ttl_later() {
+    let store = Faulty::default();
+    let (client, cancel, driving) = start(&store);
+    let _guard = lock(&client, "purge").await;
+    *store.extends_take.lock().unwrap() = GIVE_UP;
+    tokio::time::sleep(TTL.get() / 3 + Duration::from_millis(1)).await;
+
+    let cancelled = Instant::now();
+    cancel.cancel();
+    tokio::time::timeout(GIVE_UP, driving)
+        .await
+        .unwrap()
+        .unwrap();
+
+    check!(Instant::now() <= cancelled + TTL.get() + TTL.get() / 6);
+}
+
+#[tokio::test(start_paused = true)]
 async fn a_driver_ended_early_cancels_lost() {
     let store = Faulty::default();
     let (client, _cancel, driving) = start(&store);
