@@ -74,6 +74,9 @@ impl Kept {
 
     /// When the store may expire it, by this instance's clock: a ttl after it last answered for
     /// it, or after the extend out is given up on, as that may extend it too.
+    ///
+    /// An extend the store does only after it is given up on, as over a hung connection, keeps
+    /// it longer.
     pub(super) fn expires(&self) -> Instant {
         self.expires
     }

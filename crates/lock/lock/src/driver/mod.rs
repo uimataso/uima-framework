@@ -100,6 +100,8 @@ impl<P: LockProvider> LockDriver<P> {
             }
         }
 
+        // What was sent as the last lock was let go. A lock among them, taken by a client that
+        // checked just before the driver stopped, is lost at once and left to expire.
         self.messages.close();
         while let Ok(message) = self.messages.try_recv() {
             driving.handle(message);
