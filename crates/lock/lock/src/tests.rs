@@ -632,6 +632,31 @@ async fn releasing_a_lock_given_up_on_once_it_may_have_expired_does_nothing() {
 }
 
 #[tokio::test(start_paused = true)]
+async fn a_lock_taken_slowly_is_extended_in_time() {
+    let store = Faulty::default();
+    let (client, _cancel, _driving) = start(&store);
+    store.reply_in(TTL.get() / 2);
+    let guard = lock(&client, "purge").await;
+    store.reply_in(Duration::ZERO);
+
+    tokio::time::sleep(TTL.get() * 3).await;
+
+    check!(!guard.lost().is_cancelled());
+    check!(held(&store, "purge").await);
+}
+
+#[tokio::test(start_paused = true)]
+async fn release_after_the_driver_ended_is_not_an_error() {
+    let store = Faulty::default();
+    let (client, _cancel, driving) = start(&store);
+    let guard = lock(&client, "purge").await;
+    driving.abort();
+    settle().await;
+
+    assert!(let Ok(()) = guard.release().await);
+}
+
+#[tokio::test(start_paused = true)]
 async fn a_driver_ended_early_cancels_lost() {
     let store = Faulty::default();
     let (client, _cancel, driving) = start(&store);
