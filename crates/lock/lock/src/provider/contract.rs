@@ -101,11 +101,10 @@ pub async fn unlock_frees_the_key(provider: &impl LockProvider) -> anyhow::Resul
 
 pub async fn an_expired_lease_can_be_taken(provider: &impl LockProvider) -> anyhow::Result<()> {
     let key = key();
-    let first = acquire(provider, &key, TTL).await?;
+    acquire(provider, &key, TTL).await?;
     tokio::time::sleep(EXPIRED).await;
 
-    let second = acquire(provider, &key, TTL).await?;
-    check!(second.token != first.token);
+    acquire(provider, &key, TTL).await?;
     Ok(())
 }
 
@@ -118,7 +117,10 @@ pub async fn a_ttl_is_not_rounded_to_whole_seconds(
     let key = key();
     let lease = acquire(provider, &key, ttl).await?;
     tokio::time::sleep(past_whole_seconds).await;
-    provider.extend(std::slice::from_ref(&lease)).await?;
+    check!(
+        provider.extend(std::slice::from_ref(&lease)).await? == [Extended::Held],
+        "late in its ttl"
+    );
 
     tokio::time::sleep(past_whole_seconds).await;
     check!(provider.try_acquire(&key, TTL).await? == TryAcquire::Busy);

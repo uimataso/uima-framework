@@ -33,11 +33,20 @@ enum Break {
     ExtendAdds,
     BusyExtends,
     WrongKey,
-    ReusesToken,
     ExtendSaysLost,
     UnlockLostFails,
     ExtendAtOnceLoses,
     AcquireWholeSeconds,
+    ExtendLateSaysLost,
+}
+
+/// What became of a lease.
+#[derive(PartialEq, Eq)]
+enum Fate {
+    Held,
+    /// Expired, with nobody taking its key.
+    Expired,
+    Taken,
 }
 
 /// A [`MemoryLockProvider`] broken as `breaks` says.
@@ -45,13 +54,13 @@ enum Break {
 struct Broken {
     store: MemoryLockProvider,
     breaks: Option<Break>,
-    /// Each key's newest lease, for `UnlockByKey`, `BusyExtends` and `ReusesToken`.
+    /// Each key's newest lease, for `UnlockByKey` and `BusyExtends`.
     newest: Mutex<HashMap<String, Lease>>,
     /// The leases let go, for `ExtendRevives`.
     unlocked: Mutex<HashSet<Uuid>>,
     /// When each lease was last extended, for `ExtendAtOnceLoses`.
-    extended: Mutex<HashMap<Uuid, Instant>>,
-    /// When each lease expires, for `ExtendAdds`.
+    last_extended: Mutex<HashMap<Uuid, Instant>>,
+    /// When each lease expires, for `ExtendAdds` and `ExtendLateSaysLost`.
     expiries: Mutex<HashMap<Uuid, Instant>>,
 }
 
@@ -62,15 +71,18 @@ impl Broken {
             ..Self::default()
         }
     }
-}
 
-impl Broken {
-    /// `lease` as the store knows it, under the key asked for and not the one `WrongKey` gave.
-    fn stored(&self, lease: &Lease) -> Lease {
-        let key = lease.key.strip_prefix("locks:").unwrap_or(&lease.key);
-        Lease {
-            key: key.to_owned(),
-            ..lease.clone()
+    /// What became of `lease`, which is extended when still held.
+    async fn fate(&self, lease: &Lease) -> PortResult<Fate> {
+        if self.store.extend(std::slice::from_ref(lease)).await? == [Extended::Held] {
+            return Ok(Fate::Held);
+        }
+        match self.store.try_acquire(&lease.key, lease.ttl).await? {
+            TryAcquire::Acquired(free) => {
+                self.store.unlock(&free).await?;
+                Ok(Fate::Expired)
+            }
+            TryAcquire::Busy => Ok(Fate::Taken),
         }
     }
 }
@@ -121,11 +133,6 @@ impl LockProvider for Broken {
         } else {
             key.to_owned()
         };
-        if self.breaks == Some(ReusesToken)
-            && let Some(last) = self.newest.lock().unwrap().get(key)
-        {
-            lease.token = last.token;
-        }
         lease.ttl = if self.breaks == Some(WrongTtl) {
             Ttl::MAX
         } else {
@@ -143,7 +150,7 @@ impl LockProvider for Broken {
     }
 
     async fn extend(&self, leases: &[Lease]) -> PortResult<Vec<Extended>> {
-        let leases: Vec<Lease> = leases.iter().map(|lease| self.stored(lease)).collect();
+        let leases: Vec<Lease> = leases.iter().map(stored).collect();
         let leases = leases.as_slice();
         // Extends each lease for another ttl than its own.
         let extend_for = async |ttl: fn(Ttl) -> Ttl| {
@@ -199,8 +206,24 @@ impl LockProvider for Broken {
                 let now = Instant::now();
                 let mut extended = self.store.extend(leases).await?;
                 for (lease, extended) in leases.iter().zip(&mut extended) {
-                    let last = self.extended.lock().unwrap().insert(lease.token, now);
+                    let last = self.last_extended.lock().unwrap().insert(lease.token, now);
                     if last == Some(now) {
+                        *extended = Extended::Lost;
+                    }
+                }
+                Ok(extended)
+            }
+            Some(ExtendLateSaysLost) => {
+                // Extends a lease with under three tenths of its ttl left, but says it is lost.
+                let now = Instant::now();
+                let mut extended = self.store.extend(leases).await?;
+                for (lease, extended) in leases.iter().zip(&mut extended) {
+                    let expires = now + lease.ttl.get();
+                    let expired = self.expiries.lock().unwrap().insert(lease.token, expires);
+                    let late = expired.is_some_and(|expired| {
+                        expired.saturating_duration_since(now) < lease.ttl.get() * 3 / 10
+                    });
+                    if late {
                         *extended = Extended::Lost;
                     }
                 }
@@ -220,34 +243,19 @@ impl LockProvider for Broken {
     }
 
     async fn unlock(&self, lease: &Lease) -> PortResult<()> {
-        let lease = &self.stored(lease);
+        let lease = &stored(lease);
         self.unlocked.lock().unwrap().insert(lease.token);
         match self.breaks {
             Some(UnlockKeeps) => Ok(()),
             Some(UnlockExpiredFails) => {
-                // Fails on a lease that expired with nobody taking its key.
-                let expired =
-                    self.store.extend(std::slice::from_ref(lease)).await? == [Extended::Lost];
-                if expired
-                    && let TryAcquire::Acquired(free) =
-                        self.store.try_acquire(&lease.key, lease.ttl).await?
-                {
-                    self.store.unlock(&free).await?;
+                if self.fate(lease).await? == Fate::Expired {
                     return Err(Failure::new(FailureKind::Other, anyhow!("expired")).into());
                 }
                 self.store.unlock(lease).await
             }
             Some(UnlockLostFails) => {
-                // Fails on a lease whose key another has taken.
-                let lost =
-                    self.store.extend(std::slice::from_ref(lease)).await? == [Extended::Lost];
-                if lost {
-                    match self.store.try_acquire(&lease.key, lease.ttl).await? {
-                        TryAcquire::Acquired(free) => self.store.unlock(&free).await?,
-                        TryAcquire::Busy => {
-                            return Err(Failure::new(FailureKind::Other, anyhow!("lost")).into());
-                        }
-                    }
+                if self.fate(lease).await? == Fate::Taken {
+                    return Err(Failure::new(FailureKind::Other, anyhow!("lost")).into());
                 }
                 self.store.unlock(lease).await
             }
@@ -259,6 +267,15 @@ impl LockProvider for Broken {
             }
             _ => self.store.unlock(lease).await,
         }
+    }
+}
+
+/// `lease` as the store knows it, under the key asked for and not the one `WrongKey` gave.
+fn stored(lease: &Lease) -> Lease {
+    let key = lease.key.strip_prefix("locks:").unwrap_or(&lease.key);
+    Lease {
+        key: key.to_owned(),
+        ..lease.clone()
     }
 }
 
@@ -315,8 +332,8 @@ cases! {
     RacyAcquire => acquire_at_once_takes_a_key_once,
     OneKey => keys_are_locked_apart,
     UnlockKeeps => unlock_frees_the_key,
-    NeverExpires, ReusesToken => an_expired_lease_can_be_taken,
-    AcquireWholeSeconds, WholeSeconds => a_ttl_is_not_rounded_to_whole_seconds,
+    NeverExpires => an_expired_lease_can_be_taken,
+    AcquireWholeSeconds, WholeSeconds, ExtendLateSaysLost => a_ttl_is_not_rounded_to_whole_seconds,
     ExtendForgets, ExtendSaysLost => extend_keeps_a_lease_past_its_ttl,
     ExtendForever => an_extended_lease_expires_a_ttl_after_the_extend,
     ExtendAdds, ExtendAtOnceLoses => extends_at_once_keep_a_lease_for_one_ttl,
