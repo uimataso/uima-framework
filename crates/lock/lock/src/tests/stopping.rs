@@ -251,7 +251,7 @@ async fn a_store_call_that_panics_ends_the_driver_and_cancels_lost() {
         .expect("the driver ends");
 
     check!(ended.is_err_and(|error| error.is_panic()), "passing it on");
-    assert!(let Err(_) = client.try_lock("report", TTL).await);
+    assert!(let Err(_) = client.try_lock(&key("report"), TTL).await);
 }
 
 #[tokio::test(start_paused = true)]

@@ -12,7 +12,8 @@ use uima_testing::check;
 
 use crate::testing::MemoryLockProvider;
 use crate::{
-    Extended, Lease, Lock, LockClient, LockGuard, LockProvider, TryAcquire, TryLock, Ttl, new,
+    Extended, Lease, Lock, LockClient, LockGuard, LockKey, LockProvider, TryAcquire, TryLock, Ttl,
+    new,
 };
 
 mod extending;
@@ -59,7 +60,7 @@ struct Faulty {
     /// When the last extend that held its leases was sent.
     last_extended: Arc<Mutex<Option<Instant>>>,
     /// The keys of each extend that reached the store.
-    extends: Arc<Mutex<Vec<Vec<String>>>>,
+    extends: Arc<Mutex<Vec<Vec<LockKey>>>>,
     /// When each of them did.
     extends_at: Arc<Mutex<Vec<Instant>>>,
     acquire_fails: Arc<AtomicBool>,
@@ -84,7 +85,7 @@ impl Faulty {
 }
 
 impl LockProvider for Faulty {
-    async fn try_acquire(&self, key: &str, ttl: Ttl) -> PortResult<TryAcquire> {
+    async fn try_acquire(&self, key: &LockKey, ttl: Ttl) -> PortResult<TryAcquire> {
         let landing = *self.acquires_land_in.lock().unwrap();
         tokio::time::sleep(landing).await;
         let acquired = if self.acquire_fails.load(Ordering::SeqCst) {
@@ -154,14 +155,19 @@ fn start(store: &Faulty) -> (LockClient<Faulty>, CancelToken, JoinHandle<()>) {
     (client, cancel, driving)
 }
 
+/// The key named `name`.
+fn key(name: &'static str) -> LockKey {
+    LockKey::from_static(name)
+}
+
 /// The guard `try_lock` gives on `key`, failing when it is busy.
-async fn lock(client: &impl Lock, key: &str) -> LockGuard {
+async fn lock(client: &impl Lock, key: &'static str) -> LockGuard {
     lock_for(client, key, TTL).await
 }
 
 /// As [`lock`], for a `ttl` of the test's own.
-async fn lock_for(client: &impl Lock, key: &str, ttl: Ttl) -> LockGuard {
-    match client.try_lock(key, ttl).await {
+async fn lock_for(client: &impl Lock, key: &'static str, ttl: Ttl) -> LockGuard {
+    match client.try_lock(&self::key(key), ttl).await {
         Ok(TryLock::Locked(guard)) => guard,
         other => panic!("{key} not locked: {other:?}"),
     }
@@ -183,8 +189,8 @@ async fn ended(driving: JoinHandle<()>) {
 }
 
 /// Whether the store holds `key`, asked without the client.
-async fn held(store: &Faulty, key: &str) -> bool {
-    match store.store.try_acquire(key, TTL).await.unwrap() {
+async fn held(store: &Faulty, key: &'static str) -> bool {
+    match store.store.try_acquire(&self::key(key), TTL).await.unwrap() {
         TryAcquire::Busy => true,
         TryAcquire::Acquired(lease) => {
             store.store.unlock(&lease).await.unwrap();
@@ -211,10 +217,10 @@ where
     drop(client.clone());
     tokio::spawn(async move {
         let port = context.lock();
-        if let Ok(TryLock::Locked(guard)) = port.try_lock("purge", TTL).await {
+        if let Ok(TryLock::Locked(guard)) = port.try_lock(&key("purge"), TTL).await {
             tokio::task::yield_now().await;
             drop(guard);
         }
     });
-    tokio::spawn(async move { lock.try_lock("purge", TTL).await.is_ok() });
+    tokio::spawn(async move { lock.try_lock(&key("purge"), TTL).await.is_ok() });
 }

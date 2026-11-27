@@ -1,0 +1,3 @@
+CREATE TABLE others (
+  id BIGINT PRIMARY KEY
+);

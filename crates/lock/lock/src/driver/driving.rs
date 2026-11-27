@@ -84,7 +84,10 @@ impl<P: LockProvider> Driving<P> {
         self.leases.retain(|_, leased| match leased {
             Leased::Kept(kept) => {
                 if kept.deadline() <= now {
-                    warn!(key = kept.lease.key, "lost a lock not extended in time");
+                    warn!(
+                        key = %kept.lease.key,
+                        "lost a lock not extended in time"
+                    );
                     *leased = Leased::Unkept {
                         expires: kept.expires(),
                     };
@@ -177,7 +180,10 @@ impl<P: LockProvider> Driving<P> {
                     // One let go while this extend was out is lost too, as its guard meant.
                     if self.kept(lease).is_some() {
                         self.leases.remove(&lease.token);
-                        warn!(key = lease.key, "lost a lock the store no longer holds");
+                        warn!(
+                            key = %lease.key,
+                            "lost a lock the store no longer holds"
+                        );
                     }
                 }
             }
@@ -274,7 +280,7 @@ pub(crate) async fn let_go(
     let result = within(wait, provider.unlock(lease)).await;
     if let Err(error) = &result {
         warn!(
-            key = lease.key,
+            key = %lease.key,
             error = error as &dyn Error,
             "failed to let a lock go"
         );
