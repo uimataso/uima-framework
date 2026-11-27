@@ -78,7 +78,7 @@ impl<P: LockProvider> Lock for LockClient<P> {
         };
 
         let lost = CancelToken::new();
-        let fail = if Instant::now() >= Kept::deadline_after(taken_at, lease.ttl.get()) {
+        let fail = if Instant::now() >= Kept::deadline_after(taken_at, lease.ttl) {
             // Taken too slowly to keep, as it may be expiring already.
             failed(
                 FailureKind::Timeout,

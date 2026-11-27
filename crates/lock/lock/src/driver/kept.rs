@@ -1,11 +1,9 @@
 //! [`Kept`], a lock the driver keeps, and when it is due.
 
-use std::time::Duration;
-
 use tokio::time::Instant;
 use uima_cancel::CancelToken;
 
-use crate::Lease;
+use crate::{Lease, Ttl};
 
 /// A lock the driver keeps.
 ///
@@ -35,8 +33,8 @@ impl Kept {
 
     /// When a lease held by a request sent at `sent` counts as lost unless extended again, a
     /// little before the store may expire it.
-    pub(crate) fn deadline_after(sent: Instant, ttl: Duration) -> Instant {
-        sent + ttl * 4 / 5
+    pub(crate) fn deadline_after(sent: Instant, ttl: Ttl) -> Instant {
+        sent + ttl.get() * 4 / 5
     }
 
     pub(super) fn new(lease: Lease, lost: CancelToken, taken_at: Instant) -> Self {
@@ -60,7 +58,7 @@ impl Kept {
 
     /// When it counts as lost unless extended, a little before the store may expire it.
     pub(super) fn deadline(&self) -> Instant {
-        Self::deadline_after(self.held_at, self.lease.ttl.get())
+        Self::deadline_after(self.held_at, self.lease.ttl)
     }
 
     /// When the store may expire it, by this instance's clock: a ttl after it last answered for

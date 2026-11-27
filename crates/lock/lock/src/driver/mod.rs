@@ -98,6 +98,7 @@ impl<P: LockProvider> LockDriver<P> {
                 Some(reply) = driving.unlocking.join_next() => joined(reply).answer(),
             }
         }
+
         self.messages.close();
         while let Ok(message) = self.messages.try_recv() {
             driving.handle(message);
