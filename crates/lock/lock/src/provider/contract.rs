@@ -31,6 +31,7 @@ pub async fn run_all<P: LockProvider>(isolated: impl AsyncFn() -> P) {
     run_case(&isolated, extend_after_unlock_is_lost).await;
     run_case(&isolated, extend_of_an_expired_lease_is_lost).await;
     run_case(&isolated, unlock_of_a_lost_lease_leaves_the_new_holder).await;
+    run_case(&isolated, unlock_of_an_expired_lease_is_not_an_error).await;
 }
 
 pub async fn acquire_takes_a_free_key(provider: &impl LockProvider) -> anyhow::Result<()> {
@@ -180,6 +181,18 @@ pub async fn unlock_of_a_lost_lease_leaves_the_new_holder(
 
     assert!(let Ok(()) = provider.unlock(&old).await);
     check!(provider.try_acquire(&key, TTL).await? == TryAcquire::Busy);
+    Ok(())
+}
+
+pub async fn unlock_of_an_expired_lease_is_not_an_error(
+    provider: &impl LockProvider,
+) -> anyhow::Result<()> {
+    let key = key();
+    let lease = acquire(provider, &key, TTL).await?;
+    tokio::time::sleep(EXPIRED).await;
+
+    assert!(let Ok(()) = provider.unlock(&lease).await);
+    acquire(provider, &key, TTL).await?;
     Ok(())
 }
 

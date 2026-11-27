@@ -24,6 +24,7 @@ enum Break {
     WholeSeconds,
     ExtendRevives,
     RacyAcquire,
+    UnlockExpiredFails,
 }
 
 /// A [`MemoryLockProvider`] broken as `breaks` says.
@@ -145,6 +146,23 @@ impl LockProvider for Broken {
         self.unlocked.lock().unwrap().insert(lease.token);
         match self.breaks {
             Some(UnlockKeeps) => Ok(()),
+            Some(UnlockExpiredFails) => {
+                // Fails on a lease that expired with nobody taking its key.
+                let expired =
+                    self.store.extend(std::slice::from_ref(lease)).await? == [Extended::Lost];
+                if expired
+                    && let TryAcquire::Acquired(free) =
+                        self.store.try_acquire(&lease.key, lease.ttl).await?
+                {
+                    self.store.unlock(&free).await?;
+                    let failure = uima_core::Failure::new(
+                        uima_core::FailureKind::Other,
+                        anyhow::anyhow!("expired"),
+                    );
+                    return Err(failure.into());
+                }
+                self.store.unlock(lease).await
+            }
             Some(UnlockByKey) => {
                 let newest = self.newest.lock().unwrap().get(&lease.key).cloned();
                 self.store
@@ -186,6 +204,7 @@ async fn the_contract_fails_each_broken_store() {
         WholeSeconds,
         ExtendRevives,
         RacyAcquire,
+        UnlockExpiredFails,
     ] {
         let ran = tokio::spawn(contract::run_all(async move || Broken::new(breaks))).await;
 
@@ -270,6 +289,12 @@ async fn each_case_fails_the_store_breaking_it() {
     check!(
         fails(RacyAcquire, |p| async move {
             contract::acquire_at_once_takes_a_key_once(&p).await
+        })
+        .await
+    );
+    check!(
+        fails(UnlockExpiredFails, |p| async move {
+            contract::unlock_of_an_expired_lease_is_not_an_error(&p).await
         })
         .await
     );
