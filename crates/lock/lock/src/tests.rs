@@ -662,6 +662,26 @@ async fn a_lock_taken_too_slowly_to_keep_fails_and_is_let_go() {
 }
 
 #[tokio::test(start_paused = true)]
+async fn a_lock_try_lock_fails_to_let_go_still_gives_why_it_failed() {
+    let store = Faulty::default();
+    let (client, cancel, _driving) = start(&store);
+    store.unlock_fails.store(true, Ordering::SeqCst);
+
+    store.reply_in(TTL.get() * 9 / 10);
+    assert!(let Err(error) = client.try_lock("purge", TTL).await, "too slow");
+    assert!(let PortError::Failed(failure) = &error);
+    check!(failure.kind() == FailureKind::Timeout);
+    check!(error.to_string() == "failed to lock purge");
+
+    *store.on_acquire.lock().unwrap() = Some(cancel);
+    store.reply_in(Duration::from_millis(1));
+    assert!(let Err(error) = client.try_lock("report", TTL).await, "stopped");
+    assert!(let PortError::Failed(failure) = &error);
+    check!(failure.kind() == FailureKind::Unavailable);
+    check!(error.to_string() == "failed to lock report");
+}
+
+#[tokio::test(start_paused = true)]
 async fn a_guard_dropped_after_every_client_lets_the_lock_go() {
     let store = Faulty::default();
     let (client, _cancel, _driving) = start(&store);

@@ -95,8 +95,11 @@ impl<P: LockProvider> Lock for LockClient<P> {
             }));
         };
 
-        // Nothing keeps the lease, so it would keep the key from everyone until its ttl ends.
-        driver::let_go(&*self.provider, &lease, lease.ttl.get()).await?;
+        // Nothing keeps the lease, so it would keep the key from everyone until its ttl ends. One
+        // not let go is logged, and the failure that matters is why it isn't kept.
+        driver::let_go(&*self.provider, &lease, lease.ttl.get())
+            .await
+            .ok();
         fail
     }
 }
