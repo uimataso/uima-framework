@@ -25,6 +25,7 @@ enum Break {
     ExtendRevives,
     RacyAcquire,
     UnlockExpiredFails,
+    ExtendForever,
 }
 
 /// A [`MemoryLockProvider`] broken as `breaks` says.
@@ -98,6 +99,16 @@ impl LockProvider for Broken {
     async fn extend(&self, leases: &[Lease]) -> PortResult<Vec<Extended>> {
         match self.breaks {
             Some(ExtendForgets) => Ok(vec![Extended::Held; leases.len()]),
+            Some(ExtendForever) => {
+                let forever: Vec<Lease> = leases
+                    .iter()
+                    .map(|lease| Lease {
+                        ttl: Ttl::MAX,
+                        ..lease.clone()
+                    })
+                    .collect();
+                self.store.extend(&forever).await
+            }
             Some(ExtendByMin) => {
                 let short: Vec<Lease> = leases
                     .iter()
@@ -205,6 +216,7 @@ async fn the_contract_fails_each_broken_store() {
         ExtendRevives,
         RacyAcquire,
         UnlockExpiredFails,
+        ExtendForever,
     ] {
         let ran = tokio::spawn(contract::run_all(async move || Broken::new(breaks))).await;
 
@@ -289,6 +301,12 @@ async fn each_case_fails_the_store_breaking_it() {
     check!(
         fails(RacyAcquire, |p| async move {
             contract::acquire_at_once_takes_a_key_once(&p).await
+        })
+        .await
+    );
+    check!(
+        fails(ExtendForever, |p| async move {
+            contract::an_extended_lease_expires_a_ttl_after_the_extend(&p).await
         })
         .await
     );
