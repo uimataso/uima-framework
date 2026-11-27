@@ -117,7 +117,8 @@ pub struct LockGuard {
 }
 
 impl LockGuard {
-    /// Cancelled once the lock is lost, as the [`LockDriver`] counts it, or the driver ends.
+    /// Cancelled once the lock is lost, as the [`LockDriver`] counts it, or the driver stops or is
+    /// dropped.
     ///
     /// The work it guards stops early once it is.
     pub fn lost(&self) -> &CancelToken {
@@ -126,9 +127,10 @@ impl LockGuard {
 
     /// Lets the lock go, waiting until the store has.
     ///
-    /// Fails when the store does, or answers too slowly. A lock already lost is not an error, nor
-    /// is one whose driver has ended, having let it go or left it to expire, as
-    /// [`LockDriver::run`] says.
+    /// Fails when the store does, or answers too slowly, also for a lock only given up on, which
+    /// the store may still hold. One the store let go of or gave to another, or that may have
+    /// expired, is not an error, nor is one whose driver has ended, having let it go or left it to
+    /// expire, as [`LockDriver::run`] says.
     pub async fn release(mut self) -> PortResult<()> {
         let Some(lease) = self.lease.take() else {
             return Ok(());
