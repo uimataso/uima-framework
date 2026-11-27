@@ -27,6 +27,8 @@ enum Extending {
     Works,
     Fails,
     LosesThem,
+    /// Answers for none of the leases.
+    AnswersNone,
 }
 
 /// A [`MemoryLockProvider`] that is as slow or failing as set.
@@ -99,6 +101,7 @@ impl LockProvider for Faulty {
             }
             Extending::Fails => Err(down()),
             Extending::LosesThem => Ok(vec![Extended::Lost; leases.len()]),
+            Extending::AnswersNone => Ok(Vec::new()),
         };
         self.reply().await;
         let longer = *self.extends_take.lock().unwrap();
@@ -654,6 +657,23 @@ async fn release_after_the_driver_ended_is_not_an_error() {
     settle().await;
 
     assert!(let Ok(()) = guard.release().await);
+}
+
+#[tokio::test(start_paused = true)]
+async fn an_extend_answered_for_too_few_locks_fails_like_one_that_errs() {
+    let store = Faulty::default();
+    let (client, _cancel, _driving) = start(&store);
+    let guard = lock(&client, "purge").await;
+    store.extend_and(Extending::AnswersNone);
+
+    tokio::time::timeout(GIVE_UP, guard.lost().cancelled())
+        .await
+        .unwrap();
+
+    check!(
+        store.extends.lock().unwrap().len() <= 10,
+        "retried a tenth of a ttl apart, not at once"
+    );
 }
 
 #[tokio::test(start_paused = true)]

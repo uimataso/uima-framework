@@ -144,13 +144,24 @@ impl<P: LockProvider> Driving<P> {
     }
 
     /// Updates the leases still kept from what an extend got, forgetting those the store lost.
+    ///
+    /// An answer for another number of leases than were sent fails, as it can't tell which is
+    /// which.
     pub(super) fn extended(&mut self, reply: ExtendReply) {
         for lease in &reply.leases {
             if let Some(kept) = self.kept(lease) {
                 kept.answered();
             }
         }
-        let extended = match reply.result {
+        let leases = reply.leases.len();
+        let answered = reply.result.and_then(|extended| {
+            if extended.len() == leases {
+                return Ok(extended);
+            }
+            let wrong = anyhow!("answered for {} of {leases} locks", extended.len());
+            Err(Failure::new(FailureKind::Other, wrong).into())
+        });
+        let extended = match answered {
             Ok(extended) => extended,
             Err(error) => {
                 debug!(
