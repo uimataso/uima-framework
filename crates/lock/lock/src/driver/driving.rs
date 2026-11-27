@@ -108,25 +108,29 @@ impl<P: LockProvider> Driving<P> {
 
     /// Sends one extend of the leases due and not being extended already.
     pub(super) fn extend_due(&mut self, now: Instant) {
-        let due: Vec<Lease> = self
+        let mut due: Vec<&mut Kept> = self
             .leases
             .values_mut()
             .filter_map(|leased| match leased {
-                Leased::Kept(kept) if !kept.extending && kept.next_extend <= now => {
-                    kept.extending = true;
-                    Some(kept.lease.clone())
-                }
+                Leased::Kept(kept) if !kept.is_extending() && kept.next_extend <= now => Some(kept),
                 _ => None,
             })
             .collect();
         // Waited for only so long that the shortest lease can still be retried in time.
         let Some(wait) = due
             .iter()
-            .map(|lease| lease.ttl.get() / Kept::WAITS_PER_TTL)
+            .map(|kept| kept.lease.ttl.get() / Kept::WAITS_PER_TTL)
             .min()
         else {
             return;
         };
+        let due: Vec<Lease> = due
+            .iter_mut()
+            .map(|kept| {
+                kept.extending(now + wait);
+                kept.lease.clone()
+            })
+            .collect();
 
         let provider = self.provider.clone();
         self.extending.spawn(async move {
@@ -143,7 +147,7 @@ impl<P: LockProvider> Driving<P> {
     pub(super) fn extended(&mut self, reply: ExtendReply) {
         for lease in &reply.leases {
             if let Some(kept) = self.kept(lease) {
-                kept.extending = false;
+                kept.answered();
             }
         }
         let extended = match reply.result {
@@ -195,7 +199,7 @@ impl<P: LockProvider> Driving<P> {
 
     /// Whether, once stopping, a lock is still waiting for its guard.
     pub(super) fn holding(&self) -> bool {
-        self.stopping && !self.leases.is_empty()
+        !self.leases.is_empty()
     }
 
     /// `lease`, if it is still kept.

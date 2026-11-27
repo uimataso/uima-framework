@@ -36,6 +36,8 @@ struct Faulty {
     extending: Arc<Mutex<Extending>>,
     /// How long a reply to each call takes, after the store has done it.
     replies_in: Arc<Mutex<Duration>>,
+    /// How long an extend takes to reach the store.
+    extends_land_in: Arc<Mutex<Duration>>,
     /// How much longer an extend's reply takes.
     extends_take: Arc<Mutex<Duration>>,
     /// How much longer an unlock's reply takes.
@@ -79,6 +81,8 @@ impl LockProvider for Faulty {
     }
 
     async fn extend(&self, leases: &[Lease]) -> PortResult<Vec<Extended>> {
+        let landing = *self.extends_land_in.lock().unwrap();
+        tokio::time::sleep(landing).await;
         let extending = *self.extending.lock().unwrap();
         let extended = match extending {
             Extending::Works => {
@@ -209,14 +213,17 @@ async fn a_lock_the_store_says_is_lost_cancels_lost() {
 async fn a_lock_that_fails_to_extend_is_lost_before_its_ttl_ends() {
     let store = Faulty::default();
     let (client, _cancel, _driving) = start(&store);
+    let taken = Instant::now();
     let guard = lock(&client, "purge").await;
     store.extend_and(Extending::Fails);
 
-    let lost = tokio::time::timeout(TTL.get(), guard.lost().cancelled()).await;
+    tokio::time::timeout(GIVE_UP, guard.lost().cancelled())
+        .await
+        .unwrap();
 
     check!(
-        lost.is_ok(),
-        "so the holder stops before another can take it"
+        Instant::now() <= taken + TTL.get() * 4 / 5,
+        "with a fifth of it left, so the holder stops before another can take it"
     );
 }
 
@@ -428,6 +435,19 @@ async fn a_lock_taken_as_the_driver_stops_is_let_go() {
 }
 
 #[tokio::test(start_paused = true)]
+async fn a_lock_taken_as_the_driver_stops_for_another_held_fails_and_is_let_go() {
+    let store = Faulty::default();
+    let (client, cancel, _driving) = start(&store);
+    let _other = lock(&client, "report").await;
+    *store.on_acquire.lock().unwrap() = Some(cancel);
+    store.reply_in(Duration::from_millis(1));
+
+    assert!(let Err(_) = client.try_lock("purge", TTL).await);
+
+    check!(!held(&store, "purge").await);
+}
+
+#[tokio::test(start_paused = true)]
 async fn a_lock_taken_as_the_driver_stops_fails_within_its_ttl_however_slow_the_unlock() {
     let store = Faulty::default();
     let (client, cancel, _driving) = start(&store);
@@ -502,6 +522,50 @@ async fn stopping_with_a_slow_unlock_ends_by_when_the_lock_would_expire_once_let
         Instant::now() <= extended + TTL.get(),
         "as an unlock after then would do nothing"
     );
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_lock_extended_as_the_driver_stops_is_let_go_once_dropped() {
+    let store = Faulty::default();
+    let (client, cancel, driving) = start(&store);
+    let guard = lock(&client, "purge").await;
+    // The first extend, sent at a third of the ttl, reaches the store late, and its reply
+    // hangs.
+    *store.extends_land_in.lock().unwrap() = Duration::from_millis(400);
+    *store.extends_take.lock().unwrap() = GIVE_UP;
+    tokio::time::sleep(TTL.get() / 3 + Duration::from_millis(450)).await;
+
+    cancel.cancel();
+    settle().await;
+    // Past when it would expire but for that extend, had it reached the store as sent.
+    tokio::time::sleep(TTL.get() - Duration::from_millis(250)).await;
+    drop(guard);
+    tokio::time::timeout(GIVE_UP, driving)
+        .await
+        .unwrap()
+        .unwrap();
+
+    check!(!held(&store, "purge").await, "as the extend kept it");
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_lock_kept_a_while_is_let_go_once_dropped_after_the_driver_stops() {
+    let store = Faulty::default();
+    let (client, cancel, driving) = start(&store);
+    let guard = lock(&client, "purge").await;
+    tokio::time::sleep(TTL.get() + Duration::from_millis(100)).await;
+
+    cancel.cancel();
+    settle().await;
+    // Past when it would expire but for its extends.
+    tokio::time::sleep(TTL.get() / 2).await;
+    drop(guard);
+    tokio::time::timeout(GIVE_UP, driving)
+        .await
+        .unwrap()
+        .unwrap();
+
+    check!(!held(&store, "purge").await);
 }
 
 #[tokio::test(start_paused = true)]
