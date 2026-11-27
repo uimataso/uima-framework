@@ -126,9 +126,9 @@ impl LockGuard {
 
     /// Lets the lock go, waiting until the store has.
     ///
-    /// A lock already lost is not an error, nor is one whose driver has ended. A driver stopped by
-    /// its `cancel` ends once every lock is let go or may have expired; one dropped leaves them to
-    /// expire.
+    /// Fails when the store does, or answers too slowly. A lock already lost is not an error, nor
+    /// is one whose driver has ended, having let it go or left it to expire, as
+    /// [`LockDriver::run`] says.
     pub async fn release(mut self) -> PortResult<()> {
         let Some(lease) = self.lease.take() else {
             return Ok(());

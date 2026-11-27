@@ -276,7 +276,7 @@ async fn each_case_fails_the_store_breaking_it() {
     );
     check!(
         fails(WholeSeconds, |p| async move {
-            contract::a_lease_is_kept_for_the_part_seconds_of_its_ttl(&p).await
+            contract::a_ttl_is_not_rounded_to_whole_seconds(&p).await
         })
         .await
     );

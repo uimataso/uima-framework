@@ -24,7 +24,7 @@ pub async fn run_all<P: LockProvider>(isolated: impl AsyncFn() -> P) {
     run_case(&isolated, keys_are_locked_apart).await;
     run_case(&isolated, unlock_frees_the_key).await;
     run_case(&isolated, an_expired_lease_can_be_taken).await;
-    run_case(&isolated, a_lease_is_kept_for_the_part_seconds_of_its_ttl).await;
+    run_case(&isolated, a_ttl_is_not_rounded_to_whole_seconds).await;
     run_case(&isolated, extend_keeps_a_lease_past_its_ttl).await;
     run_case(&isolated, extend_keeps_each_lease_for_its_own_ttl).await;
     run_case(&isolated, extend_tells_each_lease_in_order).await;
@@ -91,7 +91,7 @@ pub async fn an_expired_lease_can_be_taken(provider: &impl LockProvider) -> anyh
     Ok(())
 }
 
-pub async fn a_lease_is_kept_for_the_part_seconds_of_its_ttl(
+pub async fn a_ttl_is_not_rounded_to_whole_seconds(
     provider: &impl LockProvider,
 ) -> anyhow::Result<()> {
     let ttl = Ttl::new(Duration::from_millis(1500))?;
