@@ -32,6 +32,10 @@ enum Break {
     ExtendForever,
     ExtendAdds,
     BusyExtends,
+    WrongKey,
+    ReusesToken,
+    ExtendSaysLost,
+    UnlockLostFails,
 }
 
 /// A [`MemoryLockProvider`] broken as `breaks` says.
@@ -39,7 +43,7 @@ enum Break {
 struct Broken {
     store: MemoryLockProvider,
     breaks: Option<Break>,
-    /// Each key's newest lease, for `UnlockByKey`.
+    /// Each key's newest lease, for `UnlockByKey`, `BusyExtends` and `ReusesToken`.
     newest: Mutex<HashMap<String, Lease>>,
     /// The leases let go, for `ExtendRevives`.
     unlocked: Mutex<HashSet<Uuid>>,
@@ -96,7 +100,16 @@ impl LockProvider for Broken {
             }
             (TryAcquire::Busy, _) => return Ok(TryAcquire::Busy),
         };
-        lease.key = key.to_owned();
+        lease.key = if self.breaks == Some(WrongKey) {
+            format!("locks:{key}")
+        } else {
+            key.to_owned()
+        };
+        if self.breaks == Some(ReusesToken)
+            && let Some(last) = self.newest.lock().unwrap().get(key)
+        {
+            lease.token = last.token;
+        }
         lease.ttl = if self.breaks == Some(WrongTtl) {
             Ttl::MAX
         } else {
@@ -163,6 +176,10 @@ impl LockProvider for Broken {
                 }
                 Ok(extended)
             }
+            Some(ExtendSaysLost) => {
+                let extended = self.store.extend(leases).await?;
+                Ok(vec![Extended::Lost; extended.len()])
+            }
             Some(ExtendRotated) => {
                 let mut extended = self.store.extend(leases).await?;
                 extended.rotate_left(1);
@@ -186,6 +203,20 @@ impl LockProvider for Broken {
                 {
                     self.store.unlock(&free).await?;
                     return Err(Failure::new(FailureKind::Other, anyhow!("expired")).into());
+                }
+                self.store.unlock(lease).await
+            }
+            Some(UnlockLostFails) => {
+                // Fails on a lease whose key another has taken.
+                let lost =
+                    self.store.extend(std::slice::from_ref(lease)).await? == [Extended::Lost];
+                if lost {
+                    match self.store.try_acquire(&lease.key, lease.ttl).await? {
+                        TryAcquire::Acquired(free) => self.store.unlock(&free).await?,
+                        TryAcquire::Busy => {
+                            return Err(Failure::new(FailureKind::Other, anyhow!("lost")).into());
+                        }
+                    }
                 }
                 self.store.unlock(lease).await
             }
@@ -217,12 +248,12 @@ where
 
 /// The tests of the contract's cases, from the break each case is there to catch.
 macro_rules! cases {
-    ($($breaks:ident => $case:ident,)*) => {
+    ($($($breaks:ident),+ => $case:ident,)*) => {
         const CASES: usize = [$(stringify!($case)),*].len();
 
         #[tokio::test(start_paused = true)]
         async fn the_contract_fails_each_broken_store() {
-            for breaks in [$($breaks),*] {
+            for breaks in [$($($breaks),+),*] {
                 let ran = tokio::spawn(contract::run_all(async move || Broken::new(breaks))).await;
 
                 check!(ran.is_err_and(|error| error.is_panic()), "{breaks:?}");
@@ -233,7 +264,9 @@ macro_rules! cases {
         async fn each_case_fails_the_store_breaking_it() {
             $(
                 let case = |provider| async move { contract::$case(&provider).await };
-                check!(fails(Broken::new($breaks), case).await, "{}", stringify!($case));
+                for breaks in [$($breaks),+] {
+                    check!(fails(Broken::new(breaks), case).await, "{breaks:?}");
+                }
                 check!(!fails(Broken::default(), case).await, "{} unbroken", stringify!($case));
             )*
         }
@@ -241,22 +274,22 @@ macro_rules! cases {
 }
 
 cases! {
-    WrongTtl => acquire_takes_a_free_key,
+    WrongTtl, WrongKey => acquire_takes_a_free_key,
     NeverBusy => acquire_on_a_held_key_is_busy,
     BusyExtends => a_busy_acquire_leaves_the_lease_to_expire,
     RacyAcquire => acquire_at_once_takes_a_key_once,
     OneKey => keys_are_locked_apart,
     UnlockKeeps => unlock_frees_the_key,
-    NeverExpires => an_expired_lease_can_be_taken,
+    NeverExpires, ReusesToken => an_expired_lease_can_be_taken,
     WholeSeconds => a_ttl_is_not_rounded_to_whole_seconds,
-    ExtendForgets => extend_keeps_a_lease_past_its_ttl,
+    ExtendForgets, ExtendSaysLost => extend_keeps_a_lease_past_its_ttl,
     ExtendForever => an_extended_lease_expires_a_ttl_after_the_extend,
     ExtendAdds => extends_at_once_keep_a_lease_for_one_ttl,
     ExtendByMin => extend_keeps_each_lease_for_its_own_ttl,
     ExtendRotated => extend_tells_each_lease_in_order,
     ExtendForgets => extend_after_unlock_is_lost,
     ExtendRevives => extend_of_an_expired_lease_is_lost,
-    UnlockByKey => unlock_of_a_lost_lease_leaves_the_new_holder,
+    UnlockByKey, UnlockLostFails => unlock_of_a_lost_lease_leaves_the_new_holder,
     UnlockExpiredFails => unlock_of_an_expired_lease_is_not_an_error,
 }
 
