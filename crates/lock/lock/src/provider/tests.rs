@@ -36,6 +36,8 @@ enum Break {
     ReusesToken,
     ExtendSaysLost,
     UnlockLostFails,
+    ExtendAtOnceLoses,
+    AcquireWholeSeconds,
 }
 
 /// A [`MemoryLockProvider`] broken as `breaks` says.
@@ -47,6 +49,8 @@ struct Broken {
     newest: Mutex<HashMap<String, Lease>>,
     /// The leases let go, for `ExtendRevives`.
     unlocked: Mutex<HashSet<Uuid>>,
+    /// When each lease was last extended, for `ExtendAtOnceLoses`.
+    extended: Mutex<HashMap<Uuid, Instant>>,
     /// When each lease expires, for `ExtendAdds`.
     expiries: Mutex<HashMap<Uuid, Instant>>,
 }
@@ -60,11 +64,23 @@ impl Broken {
     }
 }
 
+impl Broken {
+    /// `lease` as the store knows it, under the key asked for and not the one `WrongKey` gave.
+    fn stored(&self, lease: &Lease) -> Lease {
+        let key = lease.key.strip_prefix("locks:").unwrap_or(&lease.key);
+        Lease {
+            key: key.to_owned(),
+            ..lease.clone()
+        }
+    }
+}
+
 impl LockProvider for Broken {
     async fn try_acquire(&self, key: &str, ttl: Ttl) -> PortResult<TryAcquire> {
         let (store_key, store_ttl) = match self.breaks {
             Some(OneKey) => ("one", ttl),
             Some(NeverExpires) => (key, Ttl::MAX),
+            Some(AcquireWholeSeconds) => (key, whole_seconds(ttl)),
             _ => (key, ttl),
         };
         if self.breaks == Some(RacyAcquire) {
@@ -127,6 +143,8 @@ impl LockProvider for Broken {
     }
 
     async fn extend(&self, leases: &[Lease]) -> PortResult<Vec<Extended>> {
+        let leases: Vec<Lease> = leases.iter().map(|lease| self.stored(lease)).collect();
+        let leases = leases.as_slice();
         // Extends each lease for another ttl than its own.
         let extend_for = async |ttl: fn(Ttl) -> Ttl| {
             let leases: Vec<Lease> = leases
@@ -176,6 +194,18 @@ impl LockProvider for Broken {
                 }
                 Ok(extended)
             }
+            Some(ExtendAtOnceLoses) => {
+                // Extends a lease being extended by another call too, but says it is lost.
+                let now = Instant::now();
+                let mut extended = self.store.extend(leases).await?;
+                for (lease, extended) in leases.iter().zip(&mut extended) {
+                    let last = self.extended.lock().unwrap().insert(lease.token, now);
+                    if last == Some(now) {
+                        *extended = Extended::Lost;
+                    }
+                }
+                Ok(extended)
+            }
             Some(ExtendSaysLost) => {
                 let extended = self.store.extend(leases).await?;
                 Ok(vec![Extended::Lost; extended.len()])
@@ -190,6 +220,7 @@ impl LockProvider for Broken {
     }
 
     async fn unlock(&self, lease: &Lease) -> PortResult<()> {
+        let lease = &self.stored(lease);
         self.unlocked.lock().unwrap().insert(lease.token);
         match self.breaks {
             Some(UnlockKeeps) => Ok(()),
@@ -246,7 +277,7 @@ where
         .map_or(true, |result| result.is_err())
 }
 
-/// The tests of the contract's cases, from the break each case is there to catch.
+/// The tests of the contract's cases, from the breaks each case is there to catch.
 macro_rules! cases {
     ($($($breaks:ident),+ => $case:ident,)*) => {
         const CASES: usize = [$(stringify!($case)),*].len();
@@ -265,7 +296,11 @@ macro_rules! cases {
             $(
                 let case = |provider| async move { contract::$case(&provider).await };
                 for breaks in [$($breaks),+] {
-                    check!(fails(Broken::new(breaks), case).await, "{breaks:?}");
+                    check!(
+                        fails(Broken::new(breaks), case).await,
+                        "{} on {breaks:?}",
+                        stringify!($case)
+                    );
                 }
                 check!(!fails(Broken::default(), case).await, "{} unbroken", stringify!($case));
             )*
@@ -281,10 +316,10 @@ cases! {
     OneKey => keys_are_locked_apart,
     UnlockKeeps => unlock_frees_the_key,
     NeverExpires, ReusesToken => an_expired_lease_can_be_taken,
-    WholeSeconds => a_ttl_is_not_rounded_to_whole_seconds,
+    AcquireWholeSeconds, WholeSeconds => a_ttl_is_not_rounded_to_whole_seconds,
     ExtendForgets, ExtendSaysLost => extend_keeps_a_lease_past_its_ttl,
     ExtendForever => an_extended_lease_expires_a_ttl_after_the_extend,
-    ExtendAdds => extends_at_once_keep_a_lease_for_one_ttl,
+    ExtendAdds, ExtendAtOnceLoses => extends_at_once_keep_a_lease_for_one_ttl,
     ExtendByMin => extend_keeps_each_lease_for_its_own_ttl,
     ExtendRotated => extend_tells_each_lease_in_order,
     ExtendForgets => extend_after_unlock_is_lost,

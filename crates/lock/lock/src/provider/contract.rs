@@ -157,8 +157,8 @@ pub async fn extends_at_once_keep_a_lease_for_one_ttl(
     let key = key();
     let lease = acquire(provider, &key, TTL).await?;
     let extend = || provider.extend(std::slice::from_ref(&lease));
-    let (first, second, third) = tokio::join!(extend(), extend(), extend());
-    first.and(second).and(third)?;
+    let extended = tokio::join!(extend(), extend(), extend());
+    check!([extended.0?, extended.1?, extended.2?].concat() == [Extended::Held; 3]);
 
     tokio::time::sleep(EXPIRED).await;
 
