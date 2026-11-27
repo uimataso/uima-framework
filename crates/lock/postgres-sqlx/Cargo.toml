@@ -1,0 +1,32 @@
+[package]
+name = "uima-lock-postgres-sqlx"
+version.workspace = true
+rust-version.workspace = true
+edition.workspace = true
+authors.workspace = true
+
+[dependencies]
+# local crates
+uima-client-postgres-sqlx = { workspace = true }
+uima-core = { workspace = true }
+uima-lock = { workspace = true }
+
+# workspace dependencies
+sqlx = { workspace = true, features = [
+  "macros",
+  "migrate",
+  "postgres",
+  "uuid",
+] }
+
+# crate-local dependencies
+indoc = "2"
+
+[dev-dependencies]
+anyhow = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt"] }
+uima-client-postgres-sqlx = { workspace = true, features = ["testing"] }
+uima-lock = { workspace = true, features = ["testing"] }
+
+[lints]
+workspace = true

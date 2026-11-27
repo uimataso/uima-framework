@@ -17,16 +17,16 @@ uima-time = { workspace = true }
 
 # workspace dependencies
 anyhow = { workspace = true }
-tokio = { workspace = true, features = ["sync", "time"] }
-tracing = { workspace = true }
-
-# crate-local dependencies
-sqlx = { version = "0.9", default-features = false, features = [
+sqlx = { workspace = true, features = [
   "migrate",
   "postgres",
   "runtime-tokio",
   "tls-rustls",
 ] }
+tokio = { workspace = true, features = ["sync", "time"] }
+tracing = { workspace = true }
+
+# crate-local dependencies
 url = "2"
 
 # testing-only, behind the `testing` feature

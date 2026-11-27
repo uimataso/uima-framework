@@ -19,6 +19,7 @@ const EXPIRED: Duration = Duration::from_millis(1500);
 /// Runs every case, each on its own provider from `isolated`.
 pub async fn run_all<P: LockProvider>(isolated: impl AsyncFn() -> P) {
     run_case(&isolated, acquire_takes_a_free_key).await;
+    run_case(&isolated, acquire_takes_the_longest_key).await;
     run_case(&isolated, acquire_on_a_held_key_is_busy).await;
     run_case(&isolated, a_busy_acquire_leaves_the_lease_to_expire).await;
     run_case(&isolated, acquire_at_once_takes_a_key_once).await;
@@ -33,6 +34,7 @@ pub async fn run_all<P: LockProvider>(isolated: impl AsyncFn() -> P) {
     run_case(&isolated, extend_tells_each_lease_in_order).await;
     run_case(&isolated, extend_after_unlock_is_lost).await;
     run_case(&isolated, extend_of_an_expired_lease_is_lost).await;
+    run_case(&isolated, extend_of_a_lost_lease_leaves_the_new_holders_ttl).await;
     run_case(&isolated, unlock_of_a_lost_lease_leaves_the_new_holder).await;
     run_case(&isolated, unlock_of_an_expired_lease_is_not_an_error).await;
 }
@@ -43,6 +45,19 @@ pub async fn acquire_takes_a_free_key(provider: &impl LockProvider) -> anyhow::R
 
     check!(lease.key == key);
     check!(lease.ttl == TTL);
+    Ok(())
+}
+
+pub async fn acquire_takes_the_longest_key(provider: &impl LockProvider) -> anyhow::Result<()> {
+    let mut key = key().as_str().to_owned();
+    while key.len() < LockKey::MAX_LEN {
+        key.push('k');
+    }
+    let key = LockKey::new(key)?;
+    let lease = acquire(provider, &key, TTL).await?;
+
+    check!(lease.key == key);
+    check!(provider.try_acquire(&key, TTL).await? == TryAcquire::Busy);
     Ok(())
 }
 
@@ -171,14 +186,16 @@ pub async fn extends_at_once_keep_a_lease_for_one_ttl(
 pub async fn extend_keeps_each_lease_for_its_own_ttl(
     provider: &impl LockProvider,
 ) -> anyhow::Result<()> {
-    let key = key();
-    let lease = acquire(provider, &key, Ttl::from_secs(2)).await?;
+    let short = acquire(provider, &key(), Ttl::from_secs(2)).await?;
+    let long = acquire(provider, &key(), Ttl::from_secs(4)).await?;
     tokio::time::sleep(EXPIRED).await;
-    provider.extend(std::slice::from_ref(&lease)).await?;
-    // Past when it was first taken until, but not past its ttl from the extend.
-    tokio::time::sleep(EXPIRED).await;
+    let extended = provider.extend(&[short.clone(), long.clone()]).await?;
+    check!(extended == [Extended::Held, Extended::Held]);
+    // Past the short one's ttl from the extend, but not the long one's.
+    tokio::time::sleep(Duration::from_millis(2250)).await;
 
-    check!(provider.try_acquire(&key, TTL).await? == TryAcquire::Busy);
+    check!(provider.try_acquire(&long.key, TTL).await? == TryAcquire::Busy);
+    check!(let TryAcquire::Acquired(_) = provider.try_acquire(&short.key, TTL).await?);
     Ok(())
 }
 
@@ -213,6 +230,21 @@ pub async fn extend_of_an_expired_lease_is_lost(
     Ok(())
 }
 
+pub async fn extend_of_a_lost_lease_leaves_the_new_holders_ttl(
+    provider: &impl LockProvider,
+) -> anyhow::Result<()> {
+    let key = key();
+    let lost = acquire(provider, &key, Ttl::from_secs(10)).await?;
+    provider.unlock(&lost).await?;
+    acquire(provider, &key, TTL).await?;
+
+    check!(provider.extend(std::slice::from_ref(&lost)).await? == [Extended::Lost]);
+    tokio::time::sleep(EXPIRED).await;
+
+    acquire(provider, &key, TTL).await?;
+    Ok(())
+}
+
 pub async fn unlock_of_a_lost_lease_leaves_the_new_holder(
     provider: &impl LockProvider,
 ) -> anyhow::Result<()> {
@@ -237,12 +269,12 @@ pub async fn unlock_of_an_expired_lease_is_not_an_error(
 }
 
 /// A key no other case uses, so cases can share a store.
-fn key() -> String {
-    format!("contract-{}", Uuid::now_v7())
+fn key() -> LockKey {
+    LockKey::new(format!("contract-{}", Uuid::now_v7())).expect("a contract key is valid")
 }
 
 /// The lease `try_acquire` takes on `key` for `ttl`, failing when it is busy.
-async fn acquire(provider: &impl LockProvider, key: &str, ttl: Ttl) -> anyhow::Result<Lease> {
+async fn acquire(provider: &impl LockProvider, key: &LockKey, ttl: Ttl) -> anyhow::Result<Lease> {
     match provider.try_acquire(key, ttl).await? {
         TryAcquire::Acquired(lease) => Ok(lease),
         TryAcquire::Busy => anyhow::bail!("{key} is busy"),

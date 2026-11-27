@@ -4,7 +4,7 @@ use std::future::Future;
 
 use uima_core::{PortResult, Uuid};
 
-use crate::Ttl;
+use crate::{LockKey, Ttl};
 
 #[cfg(feature = "testing")]
 pub mod contract;
@@ -19,7 +19,7 @@ pub trait LockProvider: Send + Sync + 'static {
     /// Takes the lock for `ttl` without waiting, if it is free or its last lease has expired.
     fn try_acquire(
         &self,
-        key: &str,
+        key: &LockKey,
         ttl: Ttl,
     ) -> impl Future<Output = PortResult<TryAcquire>> + Send;
 
@@ -45,7 +45,7 @@ pub enum TryAcquire {
 /// A held lock, as the store knows it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Lease {
-    pub key: String,
+    pub key: LockKey,
     /// Made anew at each acquisition, so a holder extends or lets go only its own lease.
     pub token: Uuid,
     pub ttl: Ttl,

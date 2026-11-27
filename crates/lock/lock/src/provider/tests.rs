@@ -38,6 +38,9 @@ enum Break {
     ExtendAtOnceLoses,
     AcquireWholeSeconds,
     ExtendLateSaysLost,
+    ExtendByMax,
+    ExtendByKey,
+    LongKeyFails,
 }
 
 /// What became of a lease.
@@ -54,8 +57,8 @@ enum Fate {
 struct Broken {
     store: MemoryLockProvider,
     breaks: Option<Break>,
-    /// Each key's newest lease, for `UnlockByKey` and `BusyExtends`.
-    newest: Mutex<HashMap<String, Lease>>,
+    /// Each key's newest lease, for `UnlockByKey`, `ExtendByKey` and `BusyExtends`.
+    newest: Mutex<HashMap<LockKey, Lease>>,
     /// The leases let go, for `ExtendRevives`.
     unlocked: Mutex<HashSet<Uuid>>,
     /// When each lease was last extended, for `ExtendAtOnceLoses`.
@@ -88,9 +91,13 @@ impl Broken {
 }
 
 impl LockProvider for Broken {
-    async fn try_acquire(&self, key: &str, ttl: Ttl) -> PortResult<TryAcquire> {
+    async fn try_acquire(&self, key: &LockKey, ttl: Ttl) -> PortResult<TryAcquire> {
+        const ONE: LockKey = LockKey::from_static("one");
+        if self.breaks == Some(LongKeyFails) && key.as_str().len() > 50 {
+            return Err(Failure::new(FailureKind::Other, anyhow!("too long")).into());
+        }
         let (store_key, store_ttl) = match self.breaks {
-            Some(OneKey) => ("one", ttl),
+            Some(OneKey) => (&ONE, ttl),
             Some(NeverExpires) => (key, Ttl::MAX),
             Some(AcquireWholeSeconds) => (key, whole_seconds(ttl)),
             _ => (key, ttl),
@@ -107,7 +114,7 @@ impl LockProvider for Broken {
                 TryAcquire::Busy => Uuid::now_v7(),
             };
             return Ok(TryAcquire::Acquired(Lease {
-                key: key.to_owned(),
+                key: key.clone(),
                 token,
                 ttl,
             }));
@@ -116,7 +123,7 @@ impl LockProvider for Broken {
         let mut lease = match (got, self.breaks) {
             (TryAcquire::Acquired(lease), _) => lease,
             (TryAcquire::Busy, Some(NeverBusy)) => Lease {
-                key: key.to_owned(),
+                key: key.clone(),
                 token: Uuid::now_v7(),
                 ttl,
             },
@@ -129,9 +136,9 @@ impl LockProvider for Broken {
             (TryAcquire::Busy, _) => return Ok(TryAcquire::Busy),
         };
         lease.key = if self.breaks == Some(WrongKey) {
-            format!("locks:{key}")
+            LockKey::new(format!("locks-{key}")).unwrap()
         } else {
-            key.to_owned()
+            key.clone()
         };
         lease.ttl = if self.breaks == Some(WrongTtl) {
             Ttl::MAX
@@ -141,7 +148,7 @@ impl LockProvider for Broken {
         self.newest
             .lock()
             .unwrap()
-            .insert(key.to_owned(), lease.clone());
+            .insert(key.clone(), lease.clone());
         self.expiries
             .lock()
             .unwrap()
@@ -167,6 +174,35 @@ impl LockProvider for Broken {
             Some(ExtendForgets) => Ok(vec![Extended::Held; leases.len()]),
             Some(ExtendForever) => extend_for(|_| Ttl::MAX).await,
             Some(ExtendByMin) => extend_for(|_| Ttl::MIN).await,
+            Some(ExtendByMax) => {
+                let longest = leases.iter().map(|lease| lease.ttl).max();
+                let leases: Vec<Lease> = leases
+                    .iter()
+                    .map(|lease| Lease {
+                        ttl: longest.unwrap_or(lease.ttl),
+                        ..lease.clone()
+                    })
+                    .collect();
+                self.store.extend(&leases).await
+            }
+            Some(ExtendByKey) => {
+                // Extends the key's newest lease, whoever holds it, telling of the one asked for.
+                let mut extended = Vec::new();
+                for lease in leases {
+                    let newest = self.newest.lock().unwrap().get(&lease.key).cloned();
+                    let newest = Lease {
+                        ttl: lease.ttl,
+                        ..newest.unwrap_or_else(|| lease.clone())
+                    };
+                    let held = self.store.extend(std::slice::from_ref(&newest)).await?;
+                    extended.push(if newest.token == lease.token {
+                        held[0]
+                    } else {
+                        Extended::Lost
+                    });
+                }
+                Ok(extended)
+            }
             Some(WholeSeconds) => extend_for(whole_seconds).await,
             Some(ExtendAdds) => {
                 // Adds each lease's ttl to when it expired, not to now.
@@ -272,9 +308,9 @@ impl LockProvider for Broken {
 
 /// `lease` as the store knows it, under the key asked for and not the one `WrongKey` gave.
 fn stored(lease: &Lease) -> Lease {
-    let key = lease.key.strip_prefix("locks:").unwrap_or(&lease.key);
+    let key = lease.key.as_str();
     Lease {
-        key: key.to_owned(),
+        key: LockKey::new(key.strip_prefix("locks-").unwrap_or(key)).unwrap(),
         ..lease.clone()
     }
 }
@@ -327,6 +363,7 @@ macro_rules! cases {
 
 cases! {
     WrongTtl, WrongKey => acquire_takes_a_free_key,
+    LongKeyFails => acquire_takes_the_longest_key,
     NeverBusy => acquire_on_a_held_key_is_busy,
     BusyExtends => a_busy_acquire_leaves_the_lease_to_expire,
     RacyAcquire => acquire_at_once_takes_a_key_once,
@@ -337,10 +374,11 @@ cases! {
     ExtendForgets, ExtendSaysLost => extend_keeps_a_lease_past_its_ttl,
     ExtendForever => an_extended_lease_expires_a_ttl_after_the_extend,
     ExtendAdds, ExtendAtOnceLoses => extends_at_once_keep_a_lease_for_one_ttl,
-    ExtendByMin => extend_keeps_each_lease_for_its_own_ttl,
+    ExtendByMin, ExtendByMax => extend_keeps_each_lease_for_its_own_ttl,
     ExtendRotated => extend_tells_each_lease_in_order,
     ExtendForgets => extend_after_unlock_is_lost,
     ExtendRevives => extend_of_an_expired_lease_is_lost,
+    ExtendByKey => extend_of_a_lost_lease_leaves_the_new_holders_ttl,
     UnlockByKey, UnlockLostFails => unlock_of_a_lost_lease_leaves_the_new_holder,
     UnlockExpiredFails => unlock_of_an_expired_lease_is_not_an_error,
 }

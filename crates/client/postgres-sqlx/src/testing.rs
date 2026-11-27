@@ -1,5 +1,6 @@
 //! Test helpers.
 
+use std::collections::HashSet;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
 
@@ -64,10 +65,29 @@ impl TestPostgres {
     ///
     /// If the container doesn't start, its server can't be reached, or a migration fails.
     pub async fn start(migrator: &Migrator) -> Self {
+        Self::start_with_migrators(&[migrator]).await
+    }
+
+    /// Starts the container and runs each of `migrators` in turn on the template database, such
+    /// as the app's and those of the framework crates that keep tables of their own.
+    ///
+    /// # Panics
+    ///
+    /// As [`start`](Self::start) does, and if two of `migrators` record what they ran in one table,
+    /// where each would take the other's migrations for missing.
+    pub async fn start_with_migrators(migrators: &[&Migrator]) -> Self {
+        let mut tables = HashSet::new();
+        for migrator in migrators {
+            let table = &*migrator.table_name;
+            if !tables.insert(table) {
+                panic!("two migrators record what they ran in {table}");
+            }
+        }
+
         let name = container_name();
         let container = start_container(image(&name, LIFETIME), &name).await;
         let url = server_url(&container).await;
-        migrate_template(&url, migrator).await;
+        migrate_template(&url, migrators).await;
 
         let admin = PostgresClient::connect(&target(&url, "postgres"), &PostgresConfig::default())
             .await
@@ -247,15 +267,17 @@ async fn server_url(container: &ContainerAsync<GenericImage>) -> PostgresUrl {
         .expect("the container's url is valid")
 }
 
-/// Creates the template database and runs `migrator` on it.
-async fn migrate_template(url: &PostgresUrl, migrator: &Migrator) {
+/// Creates the template database and runs each of `migrators` on it.
+async fn migrate_template(url: &PostgresUrl, migrators: &[&Migrator]) {
     let template = PostgresClient::connect(&target(url, TEMPLATE), &PostgresConfig::default())
         .await
         .expect("the template database is created");
-    template
-        .migrate(migrator)
-        .await
-        .expect("the migrations run on the template database");
+    for migrator in migrators {
+        template
+            .migrate(migrator)
+            .await
+            .expect("the migrations run on the template database");
+    }
     // `CREATE DATABASE ... TEMPLATE` needs the template to have no sessions.
     template.pool().close().await;
 }
@@ -277,7 +299,7 @@ pub(crate) async fn test_migrator() -> Migrator {
 
 #[cfg(test)]
 mod tests {
-    use uima_testing::check;
+    use uima_testing::{assert, check};
 
     use super::*;
 
@@ -354,6 +376,41 @@ mod tests {
             .unwrap();
         check!(lock_timeout == "750ms");
         check!(names(&isolated).await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn the_template_runs_each_migrator() {
+        let app = test_migrator().await;
+        let mut other = other_migrator().await;
+        other.dangerous_set_table_name("_other_migrations");
+        let postgres = TestPostgres::start_with_migrators(&[&app, &other]).await;
+
+        let isolated = postgres.isolated().await;
+
+        check!(names(&isolated).await.is_empty());
+        let others: i64 = sqlx::query_scalar("SELECT count(*) FROM others")
+            .fetch_one(isolated.pool())
+            .await
+            .unwrap();
+        check!(others == 0);
+    }
+
+    #[tokio::test]
+    async fn migrators_recording_in_one_table_dont_start() {
+        let (app, other) = (test_migrator().await, other_migrator().await);
+
+        let started = tokio::spawn(async move {
+            TestPostgres::start_with_migrators(&[&app, &other]).await;
+        });
+
+        let panic = started.await.unwrap_err().into_panic();
+        assert!(let Some(message) = panic.downcast_ref::<String>());
+        check!(message == "two migrators record what they ran in _sqlx_migrations");
+    }
+
+    async fn other_migrator() -> Migrator {
+        let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/testdata/other-migrations");
+        Migrator::new(std::path::Path::new(dir)).await.unwrap()
     }
 
     #[tokio::test]

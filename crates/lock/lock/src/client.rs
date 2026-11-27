@@ -8,7 +8,7 @@ use uima_cancel::CancelToken;
 use uima_core::{Failure, FailureKind, PortResult};
 
 use crate::driver::{self, Kept, LockDriver, ToDriver};
-use crate::{Lease, LockProvider, TryAcquire, Ttl};
+use crate::{Lease, LockKey, LockProvider, TryAcquire, Ttl};
 
 /// The port use cases take locks through.
 #[uima_port_macro::has_port]
@@ -22,7 +22,8 @@ pub trait Lock: Send + Sync {
     /// [`LockDriver`] has stopped or been dropped. One that fails once the store gave the lock
     /// waits for the store to let it go, for `ttl` at most. One that fails or is cancelled may
     /// leave the key held, with no guard, until `ttl` ends.
-    fn try_lock(&self, key: &str, ttl: Ttl) -> impl Future<Output = PortResult<TryLock>> + Send;
+    fn try_lock(&self, key: &LockKey, ttl: Ttl)
+    -> impl Future<Output = PortResult<TryLock>> + Send;
 }
 
 /// What [`Lock::try_lock`] got.
@@ -62,7 +63,7 @@ impl<P> Clone for LockClient<P> {
 }
 
 impl<P: LockProvider> Lock for LockClient<P> {
-    async fn try_lock(&self, key: &str, ttl: Ttl) -> PortResult<TryLock> {
+    async fn try_lock(&self, key: &LockKey, ttl: Ttl) -> PortResult<TryLock> {
         let failed = |kind, reason: &'static str| {
             let failure = Failure::new(kind, anyhow::Error::msg(reason));
             Err(failure.context(format!("failed to lock {key}")).into())

@@ -1,0 +1,3 @@
+CREATE TABLE app (
+  id BIGINT PRIMARY KEY
+);

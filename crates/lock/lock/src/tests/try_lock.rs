@@ -9,8 +9,8 @@ async fn try_lock_takes_a_free_key_and_finds_a_held_one_busy() {
 
     let _guard = lock(&client, "purge").await;
 
-    assert!(let Ok(TryLock::Busy) = client.try_lock("purge", TTL).await);
-    assert!(let Ok(TryLock::Busy) = client.clone().try_lock("purge", TTL).await, "from a clone");
+    assert!(let Ok(TryLock::Busy) = client.try_lock(&key("purge"), TTL).await);
+    assert!(let Ok(TryLock::Busy) = client.clone().try_lock(&key("purge"), TTL).await, "from a clone");
     let _other = lock(&client, "other").await;
 }
 
@@ -19,7 +19,7 @@ async fn try_lock_fails_once_the_driver_has_stopped_or_been_dropped() {
     let store = Faulty::default();
     let (client, driver) = new(store.clone());
     drop(driver);
-    assert!(let Err(error) = client.try_lock("purge", TTL).await, "dropped");
+    assert!(let Err(error) = client.try_lock(&key("purge"), TTL).await, "dropped");
     assert!(let PortError::Failed(failure) = &error);
     check!(failure.kind() == FailureKind::Unavailable);
     check!(error.to_string() == "failed to lock purge");
@@ -32,13 +32,13 @@ async fn try_lock_fails_once_the_driver_has_stopped_or_been_dropped() {
     tokio::time::timeout(GIVE_UP, driver.run(cancel))
         .await
         .unwrap();
-    assert!(let Err(_) = client.try_lock("purge", TTL).await, "stopped");
+    assert!(let Err(_) = client.try_lock(&key("purge"), TTL).await, "stopped");
     check!(!held(&store, "purge").await);
 
     let (client, driver) = new(store.clone());
     drop(driver);
-    assert!(let Ok(TryAcquire::Acquired(_)) = store.store.try_acquire("purge", TTL).await);
-    assert!(let Err(_) = client.try_lock("purge", TTL).await, "held by another");
+    assert!(let Ok(TryAcquire::Acquired(_)) = store.store.try_acquire(&key("purge"), TTL).await);
+    assert!(let Err(_) = client.try_lock(&key("purge"), TTL).await, "held by another");
 }
 
 #[tokio::test(start_paused = true)]
@@ -49,7 +49,7 @@ async fn a_lock_taken_as_the_driver_stops_for_another_held_fails_and_is_let_go()
     *store.on_acquire.lock().unwrap() = Some(cancel);
     store.reply_in(Duration::from_millis(1));
 
-    assert!(let Err(_) = client.try_lock("purge", TTL).await);
+    assert!(let Err(_) = client.try_lock(&key("purge"), TTL).await);
 
     check!(!held(&store, "purge").await);
 }
@@ -63,7 +63,7 @@ async fn a_lock_taken_as_the_driver_stops_fails_within_its_ttl_however_slow_the_
     *store.unlocks_take.lock().unwrap() = GIVE_UP;
 
     let within = TTL.get() + Duration::from_millis(100);
-    let locked = tokio::time::timeout(within, client.try_lock("purge", TTL)).await;
+    let locked = tokio::time::timeout(within, client.try_lock(&key("purge"), TTL)).await;
 
     assert!(let Ok(Err(_)) = locked);
 }
@@ -75,7 +75,7 @@ async fn a_lock_taken_too_slowly_to_keep_fails_and_is_let_go() {
     store.reply_in(TTL.get() * 9 / 10);
     *store.unlocks_land_in.lock().unwrap() = Duration::from_millis(100);
 
-    assert!(let Err(PortError::Failed(failure)) = client.try_lock("purge", TTL).await);
+    assert!(let Err(PortError::Failed(failure)) = client.try_lock(&key("purge"), TTL).await);
     check!(failure.kind() == FailureKind::Timeout);
     store.reply_in(Duration::ZERO);
     settle().await;
@@ -90,14 +90,14 @@ async fn a_lock_try_lock_fails_to_let_go_still_gives_why_it_failed() {
     store.unlock_fails.store(true, Ordering::SeqCst);
 
     store.reply_in(TTL.get() * 9 / 10);
-    assert!(let Err(error) = client.try_lock("purge", TTL).await, "too slow");
+    assert!(let Err(error) = client.try_lock(&key("purge"), TTL).await, "too slow");
     assert!(let PortError::Failed(failure) = &error);
     check!(failure.kind() == FailureKind::Timeout);
     check!(error.to_string() == "failed to lock purge");
 
     *store.on_acquire.lock().unwrap() = Some(cancel);
     store.reply_in(Duration::from_millis(1));
-    assert!(let Err(error) = client.try_lock("report", TTL).await, "stopped");
+    assert!(let Err(error) = client.try_lock(&key("report"), TTL).await, "stopped");
     assert!(let PortError::Failed(failure) = &error);
     check!(failure.kind() == FailureKind::Unavailable);
     check!(error.to_string() == "failed to lock report");
@@ -110,5 +110,5 @@ async fn try_lock_gives_the_stores_failure() {
 
     store.acquire_fails.store(true, Ordering::SeqCst);
 
-    assert!(let Err(_) = client.try_lock("purge", TTL).await);
+    assert!(let Err(_) = client.try_lock(&key("purge"), TTL).await);
 }

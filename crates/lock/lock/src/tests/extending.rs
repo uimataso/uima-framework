@@ -172,14 +172,10 @@ async fn a_lock_of_a_longer_ttl_is_extended_along_with_a_shorter_one() {
 
     let extends = store.extends.lock().unwrap().clone();
     check!(
-        extends
-            .iter()
-            .all(|keys| keys.contains(&"purge".to_owned())),
+        extends.iter().all(|keys| keys.contains(&key("purge"))),
         "so it takes no call of its own"
     );
-    let longer = extends
-        .iter()
-        .filter(|keys| keys.contains(&"report".to_owned()));
+    let longer = extends.iter().filter(|keys| keys.contains(&key("report")));
     check!(
         longer.count() <= 60 / 5 + 1,
         "nor is extended more than twice as often as it would be on its own"
@@ -253,7 +249,7 @@ async fn a_lock_being_extended_isnt_sent_again_with_one_that_comes_due() {
     tokio::time::sleep(Duration::from_millis(400)).await;
 
     let extends = store.extends.lock().unwrap().clone();
-    check!(extends == [["purge"], ["report"]]);
+    check!(extends == [[key("purge")], [key("report")]]);
 }
 
 /// On the real clock, as it takes holding up the driver's thread, which the paused clock can't.
