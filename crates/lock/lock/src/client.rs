@@ -1,0 +1,149 @@
+//! [`LockClient`] and its [`LockGuard`]s, which take locks and give them up.
+
+use std::future::Future;
+use std::sync::Arc;
+
+use tokio::time::Instant;
+use uima_cancel::CancelToken;
+use uima_core::{Failure, FailureKind, PortResult};
+
+use crate::driver::{self, Kept, LockDriver, ToDriver};
+use crate::{Lease, LockProvider, TryAcquire, Ttl};
+
+/// The port use cases take locks through.
+#[uima_port_macro::has_port]
+pub trait Lock: Send + Sync {
+    /// Takes the lock on `key` for `ttl` without waiting, kept alive until the guard is dropped
+    /// or released.
+    ///
+    /// A key this instance holds already is busy too.
+    ///
+    /// Fails when the store does, or answers too slowly to keep the lock, or once the
+    /// [`LockDriver`] has stopped or been dropped. One that fails once the store gave the lock
+    /// waits for the store to let it go, for `ttl` at most. One that fails or is cancelled may
+    /// leave the key held, with no guard, until `ttl` ends.
+    fn try_lock(&self, key: &str, ttl: Ttl) -> impl Future<Output = PortResult<TryLock>> + Send;
+}
+
+/// What [`Lock::try_lock`] got.
+#[derive(Debug)]
+pub enum TryLock {
+    Locked(LockGuard),
+    /// Someone else holds it.
+    Busy,
+}
+
+/// A [`LockClient`] to take locks from `provider` with, and the [`LockDriver`] that keeps them.
+pub fn new<P: LockProvider>(provider: P) -> (LockClient<P>, LockDriver<P>) {
+    let provider = Arc::new(provider);
+    let (driver, to_driver) = LockDriver::new(provider.clone());
+    let client = LockClient {
+        provider,
+        driver: to_driver,
+    };
+    (client, driver)
+}
+
+/// Takes locks from a [`LockProvider`].
+///
+/// Cloning it is cheap, and every clone shares one [`LockDriver`].
+pub struct LockClient<P> {
+    provider: Arc<P>,
+    driver: ToDriver,
+}
+
+impl<P> Clone for LockClient<P> {
+    fn clone(&self) -> Self {
+        Self {
+            provider: self.provider.clone(),
+            driver: self.driver.clone(),
+        }
+    }
+}
+
+impl<P: LockProvider> Lock for LockClient<P> {
+    async fn try_lock(&self, key: &str, ttl: Ttl) -> PortResult<TryLock> {
+        let failed = |kind, reason: &'static str| {
+            let failure = Failure::new(kind, anyhow::Error::msg(reason));
+            Err(failure.context(format!("failed to lock {key}")).into())
+        };
+
+        if self.driver.is_stopped() {
+            return failed(FailureKind::Unavailable, "the lock driver has stopped");
+        }
+
+        let taken_at = Instant::now();
+        let lease = match self.provider.try_acquire(key, ttl).await? {
+            TryAcquire::Acquired(lease) => lease,
+            TryAcquire::Busy => return Ok(TryLock::Busy),
+        };
+
+        let lost = CancelToken::new();
+        let fail = if Instant::now() >= Kept::deadline_after(taken_at, lease.ttl) {
+            // Taken too slowly to keep, as it may be expiring already.
+            failed(
+                FailureKind::Timeout,
+                "the store answered too slowly to keep it",
+            )
+        } else if !self.driver.keep(lease.clone(), lost.clone(), taken_at) {
+            // The driver stopped while the lease was being taken, after the check at the start.
+            failed(FailureKind::Unavailable, "the lock driver has stopped")
+        } else {
+            return Ok(TryLock::Locked(LockGuard {
+                lease: Some(lease),
+                lost,
+                driver: self.driver.clone(),
+            }));
+        };
+
+        // Nothing keeps the lease, so it would keep the key from everyone until its ttl ends. One
+        // not let go is logged, and the failure that matters is why it isn't kept.
+        driver::let_go(&*self.provider, &lease, lease.ttl.get())
+            .await
+            .ok();
+        fail
+    }
+}
+
+/// A held lock, kept alive by the [`LockDriver`] until it is released or dropped.
+///
+/// Dropping it lets the lock go soon after, without waiting; [`release`](Self::release) waits.
+#[derive(Debug)]
+#[must_use = "dropping it lets the lock go"]
+pub struct LockGuard {
+    /// Taken by `release`, so dropping it after sends nothing.
+    lease: Option<Lease>,
+    lost: CancelToken,
+    driver: ToDriver,
+}
+
+impl LockGuard {
+    /// Cancelled once the lock is lost, as the [`LockDriver`] counts it, or the driver stops or is
+    /// dropped. Also once the guard is released or dropped.
+    ///
+    /// The work it guards stops early once it is.
+    pub fn lost(&self) -> &CancelToken {
+        &self.lost
+    }
+
+    /// Lets the lock go, waiting until the store has.
+    ///
+    /// Fails when the store does, or answers too slowly, also for a lock only given up on, which
+    /// the store may still hold. One the store let go of or gave to another, or that may have
+    /// expired, is not an error, nor is one whose driver has ended, having let it go or left it to
+    /// expire, as [`LockDriver::run`] says.
+    pub async fn release(mut self) -> PortResult<()> {
+        let Some(lease) = self.lease.take() else {
+            return Ok(());
+        };
+        self.driver.release(lease).await
+    }
+}
+
+impl Drop for LockGuard {
+    fn drop(&mut self) {
+        if let Some(lease) = self.lease.take() {
+            self.driver.dropped(lease);
+        }
+    }
+}
