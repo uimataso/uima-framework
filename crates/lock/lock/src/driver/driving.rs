@@ -174,10 +174,10 @@ impl<P: LockProvider> Driving<P> {
                     }
                 }
                 Extended::Lost => {
-                    // One let go while this extend was out is lost too, though not to another.
+                    // One let go while this extend was out is lost too, as its guard meant.
                     if self.kept(lease).is_some() {
                         self.leases.remove(&lease.token);
-                        warn!(key = lease.key, "lost a lock taken by another");
+                        warn!(key = lease.key, "lost a lock the store no longer holds");
                     }
                 }
             }

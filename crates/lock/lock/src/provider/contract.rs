@@ -20,6 +20,7 @@ const EXPIRED: Duration = Duration::from_millis(1500);
 pub async fn run_all<P: LockProvider>(isolated: impl AsyncFn() -> P) {
     run_case(&isolated, acquire_takes_a_free_key).await;
     run_case(&isolated, acquire_on_a_held_key_is_busy).await;
+    run_case(&isolated, a_busy_acquire_leaves_the_lease_to_expire).await;
     run_case(&isolated, acquire_at_once_takes_a_key_once).await;
     run_case(&isolated, keys_are_locked_apart).await;
     run_case(&isolated, unlock_frees_the_key).await;
@@ -50,6 +51,21 @@ pub async fn acquire_on_a_held_key_is_busy(provider: &impl LockProvider) -> anyh
     acquire(provider, &key, TTL).await?;
 
     check!(provider.try_acquire(&key, TTL).await? == TryAcquire::Busy);
+    Ok(())
+}
+
+pub async fn a_busy_acquire_leaves_the_lease_to_expire(
+    provider: &impl LockProvider,
+) -> anyhow::Result<()> {
+    let key = key();
+    acquire(provider, &key, TTL).await?;
+    tokio::time::sleep(TTL.get() / 2).await;
+    check!(provider.try_acquire(&key, TTL).await? == TryAcquire::Busy);
+
+    // Past the lease's ttl, but not past one from when the key was found busy.
+    tokio::time::sleep(TTL.get() * 7 / 10).await;
+
+    acquire(provider, &key, TTL).await?;
     Ok(())
 }
 

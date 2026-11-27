@@ -31,6 +31,7 @@ enum Break {
     UnlockExpiredFails,
     ExtendForever,
     ExtendAdds,
+    BusyExtends,
 }
 
 /// A [`MemoryLockProvider`] broken as `breaks` says.
@@ -87,6 +88,12 @@ impl LockProvider for Broken {
                 token: Uuid::now_v7(),
                 ttl,
             },
+            (TryAcquire::Busy, Some(BusyExtends)) => {
+                // Keeps the holder's lease for a ttl more each time another asks.
+                let held = self.newest.lock().unwrap().get(key).cloned();
+                self.store.extend(held.as_slice()).await?;
+                return Ok(TryAcquire::Busy);
+            }
             (TryAcquire::Busy, _) => return Ok(TryAcquire::Busy),
         };
         lease.key = key.to_owned();
@@ -236,6 +243,7 @@ macro_rules! cases {
 cases! {
     WrongTtl => acquire_takes_a_free_key,
     NeverBusy => acquire_on_a_held_key_is_busy,
+    BusyExtends => a_busy_acquire_leaves_the_lease_to_expire,
     RacyAcquire => acquire_at_once_takes_a_key_once,
     OneKey => keys_are_locked_apart,
     UnlockKeeps => unlock_frees_the_key,
