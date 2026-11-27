@@ -32,8 +32,8 @@ pub(super) struct Driving<P> {
 enum Leased {
     /// Extended until its guard lets it go.
     Kept(Kept),
-    /// No longer extended, but let go once its guard is, so another can't take it while its
-    /// holder stops; once stopping, only until it may have expired.
+    /// Given up on, so no longer extended, but let go once its guard is, until it may have
+    /// expired, so another can't take it while its holder stops.
     Unkept { expires: Instant },
 }
 
@@ -52,9 +52,9 @@ impl<P: LockProvider> Driving<P> {
     pub(super) fn due(&self) -> Option<Instant> {
         self.leases
             .values()
-            .filter_map(|leased| match leased {
-                Leased::Kept(kept) => Some(kept.due()),
-                Leased::Unkept { expires } => self.stopping.then_some(*expires),
+            .map(|leased| match leased {
+                Leased::Kept(kept) => kept.due(),
+                Leased::Unkept { expires } => *expires,
             })
             .min()
     }
@@ -88,10 +88,9 @@ impl<P: LockProvider> Driving<P> {
         }
     }
 
-    /// Gives up on the leases not extended in time, and once stopping, forgets those that may
-    /// have expired.
+    /// Gives up on the leases not extended in time, and forgets those given up on that may have
+    /// expired.
     pub(super) fn give_up_late(&mut self, now: Instant) {
-        let stopping = self.stopping;
         self.leases.retain(|_, leased| match leased {
             Leased::Kept(kept) => {
                 if kept.deadline() <= now {
@@ -102,7 +101,7 @@ impl<P: LockProvider> Driving<P> {
                 }
                 true
             }
-            Leased::Unkept { expires } => !stopping || *expires > now,
+            Leased::Unkept { expires } => *expires > now,
         });
     }
 
@@ -198,7 +197,7 @@ impl<P: LockProvider> Driving<P> {
         }
     }
 
-    /// Whether, once stopping, a lock is still waiting for its guard.
+    /// Whether a lock is still waiting for its guard, as all are once stopping.
     pub(super) fn holding(&self) -> bool {
         !self.leases.is_empty()
     }
@@ -211,16 +210,13 @@ impl<P: LockProvider> Driving<P> {
         }
     }
 
-    /// Forgets `lease`, giving how long to wait on letting it go: its ttl, or once stopping,
-    /// until it may have expired. None when there is nothing to let go.
+    /// Forgets `lease`, giving how long to wait on letting it go: until it may have expired.
+    /// None when there is nothing to let go.
     fn forget(&mut self, lease: &Lease) -> Option<Duration> {
         let expires = match self.leases.remove(&lease.token)? {
             Leased::Kept(kept) => kept.expires(),
             Leased::Unkept { expires } => expires,
         };
-        if !self.stopping {
-            return Some(lease.ttl.get());
-        }
         Some(expires.saturating_duration_since(Instant::now()))
     }
 
