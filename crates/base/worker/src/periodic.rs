@@ -2,12 +2,11 @@
 //!
 //! # Metrics
 //!
-//! A [`Runner`] keeps the metrics named by [`STARTED`], [`LAST_ATTEMPT`], [`LAST_SUCCESS`] and
-//! [`RUNS`], each with the job's name as its `job_name` label, as in its logs. Times are in unix
-//! seconds.
+//! A [`Runner`] keeps the metric named by [`STARTED`], and runs its job [`Measured`], which keeps
+//! those of each run. Each has the job's name as its `job_name` label, as in its logs. Times are
+//! in unix seconds.
 
 use std::any::Any;
-use std::future::Future;
 use std::panic::AssertUnwindSafe;
 use std::time::Duration;
 
@@ -19,35 +18,13 @@ use uima_time::{Clock, SystemClock, TimestampExt as _};
 
 use uima_runtime::Subsystem;
 
+use crate::{Job, Measured};
+
 #[cfg(test)]
 mod tests;
 
 /// The gauge of when the runner started.
 pub const STARTED: &str = "job_started_timestamp_seconds";
-
-/// The gauge of when the last run ended, however it ended.
-pub const LAST_ATTEMPT: &str = "job_last_attempt_timestamp_seconds";
-
-/// The gauge of when the last run that succeeded ended. Until one does, there is none.
-pub const LAST_SUCCESS: &str = "job_last_success_timestamp_seconds";
-
-/// The counter of runs, by their `outcome` label, one of `succeeded`, `failed` or `panicked`.
-pub const RUNS: &str = "job_runs_total";
-
-/// A job that runs over and over, such as a cleanup, through [`Runner`].
-pub trait Job: Send {
-    /// Names the job as `job_name` in logs and metrics. Each job in a service needs its own,
-    /// non-empty name, since jobs sharing a name share their metrics.
-    fn name(&self) -> &str;
-
-    /// Runs the job once.
-    ///
-    /// A run that can take long checks `cancel` to stop early, and gives `Ok` when it does, since
-    /// an error from a run that ends after the cancel is what [`Runner`] ends with. After a run
-    /// panics, the next one runs on the same `self`, as the panic left it.
-    fn run_once(&mut self, cancel: &CancelToken)
-    -> impl Future<Output = anyhow::Result<()>> + Send;
-}
 
 /// When a job runs.
 #[derive(Clone, Copy, Debug)]
@@ -101,11 +78,18 @@ pub struct Runner<J> {
     config: Config,
 }
 
-impl<J: Job> Runner<J> {
-    /// A runner of `job` on `config`.
+impl<J: Job> Runner<Measured<J>> {
+    /// A runner of `job`, [`Measured`], on `config`.
     ///
     /// Fails when `config`'s `every` is zero.
     pub fn new(job: J, config: Config) -> anyhow::Result<Self> {
+        Runner::of(Measured::new(job), config)
+    }
+}
+
+impl<J: Job> Runner<J> {
+    /// A runner of `job` as it is, on `config`.
+    fn of(job: J, config: Config) -> anyhow::Result<Self> {
         anyhow::ensure!(
             !config.behavior.every().is_zero(),
             "{} runs every 0 seconds",
@@ -127,16 +111,13 @@ impl<J: Job> Subsystem for Runner<J> {
 }
 
 impl<J: Job> Runner<J> {
-    /// [`Subsystem::run`], reading the time for its metrics from `clock`.
+    /// [`Subsystem::run`], reading the time it started from `clock`.
     async fn run_on(mut self, cancel: CancelToken, clock: &impl Clock) -> anyhow::Result<()> {
         // Owned, since each run borrows the job mutably.
         let name = self.job.name().to_owned();
         let job_name = name.as_str();
 
-        let gauge = |metric: &'static str, at: f64| {
-            metrics::gauge!(metric, "job_name" => name.clone()).set(at);
-        };
-        gauge(STARTED, clock.now().unix_seconds());
+        metrics::gauge!(STARTED, "job_name" => name.clone()).set(clock.now().unix_seconds());
 
         info!(job_name, "started");
 
@@ -170,18 +151,6 @@ impl<J: Job> Runner<J> {
                 finished,
             });
             let took = finished - started;
-
-            let ended_at = clock.now().unix_seconds();
-            let outcome = match ran {
-                Ok(Ok(())) => {
-                    gauge(LAST_SUCCESS, ended_at);
-                    "succeeded"
-                }
-                Ok(Err(_)) => "failed",
-                Err(_) => "panicked",
-            };
-            gauge(LAST_ATTEMPT, ended_at);
-            metrics::counter!(RUNS, "job_name" => name.clone(), "outcome" => outcome).increment(1);
 
             let stopping = cancel.is_cancelled();
             match (ran, stopping) {

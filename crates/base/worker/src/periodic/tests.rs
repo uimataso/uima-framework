@@ -578,7 +578,7 @@ async fn metrics_after(outcomes: &[Outcome]) -> (Seen, f64, Vec<f64>) {
     };
 
     let started = clock.now().unix_seconds();
-    let _ = Runner::new(wall, config)
+    let _ = Runner::of(Measured::on(wall, clock.clone()), config)
         .unwrap()
         .run_on(CancelToken::new(), &clock)
         .timeout(GIVE_UP)
@@ -626,7 +626,7 @@ async fn the_metrics_mark_the_start_each_run_and_each_success() {
         first_run: FirstRun::OnSchedule,
     };
     let run = pin!(
-        Runner::new(wall, config)
+        Runner::of(Measured::on(wall, clock.clone()), config)
             .unwrap()
             .run_on(CancelToken::new(), &clock)
     );
