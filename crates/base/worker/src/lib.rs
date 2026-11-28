@@ -35,6 +35,8 @@
 //! ```
 
 mod job;
+mod locked;
 pub mod periodic;
 
 pub use job::{Job, LAST_ATTEMPT, LAST_SUCCESS, Measured, RUNS};
+pub use locked::{LOCK_TRIES, LOCKS_LOST, Locked};

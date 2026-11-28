@@ -14,11 +14,12 @@ use futures_util::FutureExt as _;
 use tokio::time::Instant;
 use tracing::{debug, error, info, warn};
 use uima_cancel::{CancelExt as _, CancelToken};
+use uima_lock::{Lock, LockKey, Ttl};
 use uima_time::{Clock, SystemClock, TimestampExt as _};
 
 use uima_runtime::Subsystem;
 
-use crate::{Job, Measured};
+use crate::{Job, Locked, Measured};
 
 #[cfg(test)]
 mod tests;
@@ -84,6 +85,21 @@ impl<J: Job> Runner<Measured<J>> {
     /// Fails when `config`'s `every` is zero.
     pub fn new(job: J, config: Config) -> anyhow::Result<Self> {
         Runner::of(Measured::new(job), config)
+    }
+
+    /// The runner, running `job` [`Locked`], on the lock on `key` from `lock` for `ttl`.
+    ///
+    /// A run another instance holds the lock for keeps no metrics of `job`'s.
+    pub fn on_one_instance<L: Lock>(
+        self,
+        lock: L,
+        key: LockKey,
+        ttl: Ttl,
+    ) -> Runner<Locked<Measured<J>, L>> {
+        Runner {
+            job: Locked::new(self.job, lock, key, ttl),
+            config: self.config,
+        }
     }
 }
 
@@ -154,7 +170,7 @@ impl<J: Job> Runner<J> {
 
             let stopping = cancel.is_cancelled();
             match (ran, stopping) {
-                (Ok(Ok(())), _) => debug!(job_name, ?took, "run succeeded"),
+                (Ok(Ok(())), _) => debug!(job_name, ?took, "run ended"),
                 (Ok(Err(error)), true) => {
                     return Err(error.context(format!("{job_name} failed while stopping")));
                 }
