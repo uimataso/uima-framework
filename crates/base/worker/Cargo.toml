@@ -8,6 +8,7 @@ authors.workspace = true
 [dependencies]
 # local crates
 uima-cancel = { workspace = true }
+uima-lock = { workspace = true }
 uima-runtime = { workspace = true }
 uima-time = { workspace = true }
 
@@ -20,6 +21,8 @@ tracing = { workspace = true }
 
 [dev-dependencies]
 # local crates
+uima-core = { workspace = true }
+uima-lock = { workspace = true, features = ["testing"] }
 uima-log-tracing-subscriber = { workspace = true, features = ["testing"] }
 uima-testing = { workspace = true }
 uima-time = { workspace = true, features = ["testing"] }

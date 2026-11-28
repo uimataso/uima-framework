@@ -3281,6 +3281,8 @@ dependencies = [
  "tokio",
  "tracing",
  "uima-cancel",
+ "uima-core",
+ "uima-lock",
  "uima-log-tracing-subscriber",
  "uima-runtime",
  "uima-testing",
