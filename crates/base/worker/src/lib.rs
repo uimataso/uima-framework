@@ -8,11 +8,11 @@
 //!
 //! use uima_cancel::CancelToken;
 //! use uima_runtime::Subsystem as _;
-//! use uima_worker::periodic;
+//! use uima_worker::{Job, periodic};
 //!
 //! struct PurgeExpiredSessions;
 //!
-//! impl periodic::Job for PurgeExpiredSessions {
+//! impl Job for PurgeExpiredSessions {
 //!     fn name(&self) -> &str {
 //!         "purge-expired-sessions"
 //!     }
@@ -34,4 +34,7 @@
 //! # }
 //! ```
 
+mod job;
 pub mod periodic;
+
+pub use job::{Job, LAST_ATTEMPT, LAST_SUCCESS, Measured, RUNS};
